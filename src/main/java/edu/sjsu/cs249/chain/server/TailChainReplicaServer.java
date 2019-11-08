@@ -23,7 +23,7 @@ public class TailChainReplicaServer {
 
     public TailChainReplicaServer(int port) {
         this.port = port;
-        // create a gRPC server and register Replicated Incremental HashTable Service
+        // create a gRPC server and register tail chain replica service
         server = ServerBuilder.forPort(port)
                 .addService(new TailChainReplicaService())
                 .build();
@@ -33,7 +33,7 @@ public class TailChainReplicaServer {
         // start gRPC server
         server.start();
         LOG.info("Server started successfully on the port: {}", port);
-        // to stop gRPC daemon threads, register a shutdown hook
+        // register a shutdown hook to stop gRPC daemon threads gracefully on JVM shutdown
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Server shutdown is in progress...");
             TailChainReplicaServer.this.stop();
