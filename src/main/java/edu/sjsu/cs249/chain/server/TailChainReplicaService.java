@@ -13,7 +13,7 @@ import edu.sjsu.cs249.chain.TailStateTransferRequest;
 import edu.sjsu.cs249.chain.TailStateUpdateRequest;
 import io.grpc.stub.StreamObserver;
 
-public class TailReplicaService extends TailChainReplicaImplBase {
+public class TailChainReplicaService extends TailChainReplicaImplBase {
 
     @Override
     public void proposeStateUpdate(TailStateUpdateRequest req, StreamObserver<ChainResponse> rspObs) {
