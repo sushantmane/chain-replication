@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ZookeeperClient implements Watcher {
@@ -25,12 +24,12 @@ public class ZookeeperClient implements Watcher {
     private ZooKeeper zk;
     private String connectString;
     private int timeout;
-    private long sessionId;
+    private long mySid;
     private CountDownLatch connLatch = new CountDownLatch(1);
     private AtomicLong predecessorSid = new AtomicLong();
     private AtomicLong successorSid = new AtomicLong();
-    private AtomicBoolean tail = new AtomicBoolean();
-    private AtomicBoolean head = new AtomicBoolean();
+    private AtomicLong headSid = new AtomicLong();
+    private AtomicLong tailSid = new AtomicLong();
 
     protected ZookeeperClient(String connectString, int timeout) {
         this.connectString = connectString;
@@ -38,23 +37,30 @@ public class ZookeeperClient implements Watcher {
     }
 
     // connect with zookeeper server and establish a session
-    // return -1 if fails to establish a session otherwise return session id
+    // return -1 if unable to establish a session otherwise return session id
     public long connect() {
         try {
+            LOG.info("Connecting to zookeeper server...");
             zk = new ZooKeeper(connectString, timeout,this);
             // wait for session establishment
             connLatch.await();
-            sessionId = zk.getSessionId();
+            mySid = zk.getSessionId();
+            LOG.info("Connected to zookeeper server. SessionId: {}", mySid);
         } catch (IOException | InterruptedException e) {
             return -1;
         }
-        return sessionId;
+        return mySid;
+    }
+
+    public long getSessionId() {
+        return mySid;
     }
 
     // end zookeeper session
     public void closeConnection() {
         try {
             zk.close();
+            LOG.info("Zookeeper connection has been closed.");
         } catch (InterruptedException e) {
             // ok
         }
@@ -64,10 +70,54 @@ public class ZookeeperClient implements Watcher {
     public void process(WatchedEvent watchedEvent) {
         LOG.info("New notification - type: {} state: {}", watchedEvent.getType(),
                 watchedEvent.getState().toString());
+        if (watchedEvent.getState() == Event.KeeperState.Expired
+                || watchedEvent.getState() == Event.KeeperState.Closed) {
+            LOG.info("Stopping zookeeper. Cause: " + watchedEvent.getState().toString());
+        }
         if (watchedEvent.getState() == Event.KeeperState.SyncConnected) {
             // session established, open connect latch
             connLatch.countDown();
         }
+        try {
+            updateContext();
+        } catch (KeeperException | InterruptedException e) {
+            // failed to update context; retry
+        }
+    }
+
+    // update roles of nodes in chain
+    protected void updateContext() throws KeeperException, InterruptedException {
+        // todo: replace with chain root
+        List<Long> sids = getOrderListOfChainNodes("/tail-chain", true);
+        if (sids.size() == 0) {
+            return;
+        }
+        headSid.set(sids.get(0));
+        tailSid.set(sids.get(sids.size() - 1));
+        // position of this replica in chain
+        int myIndex = sids.indexOf(mySid);
+        // except head replica all other nodes have predecessor replica
+        if (myIndex == 0) {
+            predecessorSid.set(-1); // -1 indicates no predecessor
+        } else {
+            predecessorSid.set(sids.get(myIndex - 1));
+        }
+        // except tail replica all other nodes have successor replica
+        if (myIndex == sids.size() - 1) {
+            successorSid.set(-1); // -1 indicates no successor
+        } else {
+            successorSid.set(sids.get(myIndex + 1));
+        }
+    }
+
+    // return true if node exists
+    public boolean exists(String path, boolean watch)
+            throws KeeperException, InterruptedException {
+        Stat stat = zk.exists(path, watch);
+        if (stat == null) {
+            return false;
+        }
+        return true;
     }
 
     // create a node and set data for it
@@ -105,6 +155,22 @@ public class ZookeeperClient implements Watcher {
         return rc;
     }
 
+    // returns sorted list of children of given node
+    protected List<Long> getOrderListOfChainNodes(String path, boolean watch)
+            throws KeeperException, InterruptedException {
+        List<String> children = getChildren(path, watch);
+        List<Long> sessionIds = new ArrayList<>();
+        for (String child : children) {
+            try {
+                sessionIds.add(Utils.getLongSid(child));
+            } catch (NumberFormatException e) {
+                // skip non-numbers
+            }
+        }
+        sessionIds.sort(Long::compare);
+        return sessionIds;
+    }
+
     // return true of sid is successor of this session id
     protected boolean isSuccessor(long sid) {
         return sid == successorSid.get();
@@ -115,45 +181,38 @@ public class ZookeeperClient implements Watcher {
         return sid == predecessorSid.get();
     }
 
-    // return true if this node is first in chain
+    protected boolean isHead(long sid) {
+        return sid == headSid.get();
+    }
+
+    protected boolean isTail(long sid) {
+        return sid == tailSid.get();
+    }
+
     protected boolean amIHead() {
-        return head.get();
+        return mySid == headSid.get();
     }
 
-    // return true if this node is last in chain
     protected boolean amITail() {
-        return tail.get();
+        return mySid == tailSid.get();
     }
 
-    // returns sorted list of children of given node
-    protected List<Long> getOrderListOfChainNodes(String path, boolean watch)
-            throws KeeperException, InterruptedException {
-        List<String> children = getChildren(path, watch);
-        List<Long> sessionIds = new ArrayList<>();
-        for (String child : children) {
-            try {
-                sessionIds.add(Utils.getLongSessionId(child));
-            } catch (NumberFormatException e) {
-                // skip non-numbers
-            }
+    // todo: remove following two methods
+    protected long getNext(String path, long sid) throws KeeperException, InterruptedException {
+        List<Long> replicas = getOrderListOfChainNodes(path, true);
+        int index = replicas.indexOf(sid);
+        if (index == -1 || index == replicas.size() - 1) {
+            return -1;
         }
-        sessionIds.sort(Long::compare);
-        return sessionIds;
+        return replicas.get(index + 1);
     }
 
-    public static void main(String[] args) throws IOException, KeeperException, InterruptedException {
-        ZookeeperClient client = new ZookeeperClient("192.168.56.111:9999", 3000);
-        long sid = client.connect();
-        String chainRoot = "/tail-chain";
-        String path = chainRoot + "/" + Utils.getHexSessionId(sid);
-        String data = "127.0.0.1:5144";
-        System.out.println("Path: " + path);
-//        client.create(path, data, CreateMode.EPHEMERAL);
-        client.create(path+"0", data, CreateMode.EPHEMERAL);
-        client.create(path+"1", data, CreateMode.EPHEMERAL);
-        client.create(path+"2", data, CreateMode.EPHEMERAL);
-        System.out.println(client.getOrderListOfChainNodes(chainRoot, true));
-
-        Thread.sleep(100000);
+    protected long getPrev(String path, long sid) throws KeeperException, InterruptedException {
+        List<Long> replicas = getOrderListOfChainNodes(path, true);
+        int index = replicas.indexOf(sid);
+        if (index <= 0) {
+            return -1;
+        }
+        return replicas.get(index - 1);
     }
 }
