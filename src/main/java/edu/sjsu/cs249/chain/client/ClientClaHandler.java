@@ -12,19 +12,21 @@ import org.apache.commons.cli.ParseException;
 import java.io.PrintWriter;
 
 /**
- * Replicated Incremental HashTable Service Client
+ * Client Command Line Argument Handler
  */
-public class ClientCliHandler {
+public class ClientClaHandler {
 
-    protected static final String APPNAME = "CRSClient";
-    protected static final String HELP = "h";
-    protected static final String PORT = "p";
-    protected static final String ZROOT = "r";
-    protected static final String INCR = "inc";
-    protected static final String GET = "get";
-    protected static final String DELETE = "del";
-    protected static final String ORACLE = "z";
-    protected static final String REPL = "repl";
+    static final String APPNAME = "ClientMain";
+    static final String HELP = "h";
+    static final String PORT = "p";
+    static final String ZROOT = "r";
+    static final String INCR = "inc";
+    static final String GET = "get";
+    static final String DELETE = "del";
+    static final String ORACLE = "z";
+    static final String REPL = "repl";
+    static final String NIF = "nif";
+    static final String HOST = "host";
 
     public static CommandLine parse(String[] args) {
         /**
@@ -63,7 +65,8 @@ public class ClientCliHandler {
     private static void printHelpAndExit() {
         HelpFormatter formatter = new HelpFormatter();
         formatter.setWidth(120);
-        formatter.printHelp(APPNAME, getOptions(), true);
+//        formatter.printHelp(APPNAME, getOptions(), true);
+        formatter.printHelp(APPNAME, "\nWhere:", getOptions(), null, true);
         System.exit(0);
     }
 
@@ -121,6 +124,20 @@ public class ClientCliHandler {
                 .build());
         group.setRequired(true);
         options.addOptionGroup(group);
+        OptionGroup hostOptions = new OptionGroup();
+        hostOptions.addOption(Option.builder()
+                .desc("host ip on which client will hear back from tail")
+                .hasArg()
+                .longOpt(HOST)
+                .argName("host-ip")
+                .build());
+        hostOptions.addOption(Option.builder()
+                .desc("network interface on which client will hear back from tail")
+                .hasArg()
+                .longOpt(NIF)
+                .argName("net-interface")
+                .build());
+        options.addOptionGroup(hostOptions);
         return options;
     }
 

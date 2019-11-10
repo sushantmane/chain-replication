@@ -2,8 +2,11 @@ package edu.sjsu.cs249.chain.client;
 
 import edu.sjsu.cs249.chain.GetRequest;
 import edu.sjsu.cs249.chain.GetResponse;
+import edu.sjsu.cs249.chain.HeadResponse;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc.TailChainReplicaBlockingStub;
+import edu.sjsu.cs249.chain.TailDeleteRequest;
+import edu.sjsu.cs249.chain.TailIncrementRequest;
 import edu.sjsu.cs249.chain.util.Utils;
 import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.ManagedChannel;
@@ -16,19 +19,21 @@ import java.net.InetSocketAddress;
 public class TailChainClient {
 
     private ManagedChannel channel;
+    private ZookeeperClient zk;
     private TailChainReplicaBlockingStub headStub;
     private TailChainReplicaBlockingStub tailStub;
     // ip address and port number of host on which it
     // will listen for messages from tail replica node
     private String host;
     private int port;
-    private ZookeeperClient zk;
     private long sid;
     private String root;
+    private int cXid = 0; // client transaction id
 
-    public TailChainClient(String zkAddress, String root, int port) {
+    public TailChainClient(String zkAddress, String root, String host, int port) {
         this.port = port;
         this.root = root;
+        this.host = host;
         this.zk = new ZookeeperClient(zkAddress, root);
     }
 
@@ -36,7 +41,6 @@ public class TailChainClient {
         zk.connect();
         sid = zk.getSessionId();
     }
-
 
     private String sidToZNode(long sessionId) {
         return root + "/" + Utils.getHexSid(sessionId);
@@ -64,7 +68,6 @@ public class TailChainClient {
         zk.updateContext();
         System.out.println("tail: " + zk.getTailReplica());
         tailStub = getStub(zk.getTailReplica());
-
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
         GetResponse rsp;
         int rc = 1;
@@ -73,6 +76,7 @@ public class TailChainClient {
             rc = rsp.getRc();
             if (rc == 1) {
                 System.out.println("The tail has been changed. Retrying...");
+                // todo: check need to invoke updateContext() before proceeding
             }
         } while (rc == 1);
         if (rc == 0) {
@@ -91,6 +95,24 @@ public class TailChainClient {
      *              Negative value will decrement the value by value.
      */
     public void increment(String key, int value) {
+        TailIncrementRequest req = TailIncrementRequest.newBuilder()
+                .setKey(key)
+                .setIncrValue(value)
+                .setHost(host)
+                .setPort(port)
+                .setCxid(cXid)
+                .build();
+        int rc;
+        do {
+            rc = headStub.increment(req).getRc();
+            // todo: handle grpc exception
+            if (rc != 0) {
+                System.out.println("The head has been changed. Retrying...");
+                // todo: check need to invoke updateContext() before proceeding
+            }
+        } while (rc != 0);
+
+        // todo: wait for response from tail
     }
 
     /**
@@ -98,14 +120,6 @@ public class TailChainClient {
      * @param key
      */
     public void delete(String key) {
-    }
-
-    public static void main(String[] args) throws KeeperException, InterruptedException, IOException {
-        String zkAddress = "192.168.56.111:9999";
-        String chainRoot = "/tail-chain";
-        int port = 4415;
-        TailChainClient client = new TailChainClient(zkAddress, chainRoot, port);
-        client.connectToZk();
-        client.get("cs249");
+        TailDeleteRequest req
     }
 }

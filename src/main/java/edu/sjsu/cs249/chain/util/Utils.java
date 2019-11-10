@@ -33,7 +33,7 @@ public class Utils {
      * @param netIf network interface name
      * @return IP4 address or an empty string if fails too get the address
      */
-    public static String getLocalhostIp4Addr(String netIf) {
+    public static String getHostIp4Addr(String netIf) {
         String ip = "";
         try {
             NetworkInterface nif = NetworkInterface.getByName(netIf);
