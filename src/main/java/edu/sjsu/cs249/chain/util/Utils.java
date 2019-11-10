@@ -1,16 +1,64 @@
 package edu.sjsu.cs249.chain.util;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.UnknownHostException;
+import java.util.Enumeration;
+
 public class Utils {
 
-    // convert long session id to hex session id string
+    /**
+     * convert session id to hex session id string
+     * @param sessionId
+     * @return string representing hex sessionId
+     */
     public static String getHexSid(long sessionId) {
         // return "0x" + Long.toHexString(sessionId);
         return Long.toHexString(sessionId);
     }
 
-    // convert hex session id to long session id
+    /**
+     * convert hex session id to long session id
+     * @param sessionId
+     * @return sessionId
+     */
     public static long getLongSid(String sessionId) {
         return Long.parseLong(sessionId, 16);
+    }
+
+    /**
+     * Get Ip4 address associated with given network interface
+     * @param netIf network interface name
+     * @return IP4 address or empty string if fails too get address
+     */
+    public static String getLocalhostIp4Addr(String netIf) {
+        String ip = "";
+        try {
+            NetworkInterface nif = NetworkInterface.getByName(netIf);
+            Enumeration<InetAddress> addresses = nif.getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                InetAddress addr = addresses.nextElement();
+                if (addr instanceof Inet4Address) {
+                    return addr.getHostAddress();
+                }
+            }
+        } catch (Exception ignore) {
+        }
+        return ip;
+    }
+
+    /**
+     * Get host machine ip4 address
+     * @return IP4 address or empty string if it fails to get address
+     */
+    public static String getLocalhost() {
+        String ip = "";
+        try {
+            ip = Inet4Address.getLocalHost().getHostAddress();
+        } catch (UnknownHostException ignored) {
+        }
+        return ip;
     }
 
     public static void main(String[] args) {

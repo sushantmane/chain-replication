@@ -26,7 +26,6 @@ public class CRSClient {
     private static final String ORACLE = "z";
 
     public static void main(String[] args) {
-
         /**
          * Print help if -h flag is set.
          * This works only if -h is first cmd argument.
@@ -84,6 +83,7 @@ public class CRSClient {
                 .desc("client will listen on this port for messages from the tail replica")
                 .hasArg()
                 .longOpt("port")
+                .required()
                 .argName("port-number")
                 .build());
         options.addOption(Option.builder(ORACLE)
@@ -100,7 +100,6 @@ public class CRSClient {
                 .hasArg()
                 .argName("root-znode")
                 .build());
-
         OptionGroup group = new OptionGroup();
         group.addOption(Option.builder()
                 .desc("increment the value of given key by specified value")
