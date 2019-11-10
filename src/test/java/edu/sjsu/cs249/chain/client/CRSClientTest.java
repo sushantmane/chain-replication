@@ -20,13 +20,13 @@ class CRSClientTest {
 
     @Test
     void main_Test() {
-        String[] args = {"-z", "192.168.56.111:5144", "-p 8787", "-r", "/", "--inc", "red", "10"};
+        String[] args = {"-z", "192.168.56.111:5144", "-p", "8787", "-r", "/", "--inc", "red", "10"};
         CRSClient.main(args);
     }
 
     @Test
     void main_KVTest() {
-        String[] args = {"-z", "192.168.56.111:5144", "-r", "/tail-chain", "--inc", "sushant", "10", "123"};
+        String[] args = {"-z", "192.168.56.111:5144", "-p", "8787", "-r", "/tail-chain", "--inc", "sushant", "10", "123"};
         CRSClient.main(args);
     }
 }

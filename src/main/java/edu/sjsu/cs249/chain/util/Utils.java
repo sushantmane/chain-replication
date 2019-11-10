@@ -2,6 +2,7 @@ package edu.sjsu.cs249.chain.util;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.UnknownHostException;
 import java.util.Enumeration;
@@ -30,7 +31,7 @@ public class Utils {
     /**
      * Get Ip4 address associated with given network interface
      * @param netIf network interface name
-     * @return IP4 address or empty string if fails too get address
+     * @return IP4 address or an empty string if fails too get the address
      */
     public static String getLocalhostIp4Addr(String netIf) {
         String ip = "";
@@ -50,7 +51,7 @@ public class Utils {
 
     /**
      * Get host machine ip4 address
-     * @return IP4 address or empty string if it fails to get address
+     * @return IP4 address or an empty string if it fails to get the address
      */
     public static String getLocalhost() {
         String ip = "";
@@ -59,6 +60,12 @@ public class Utils {
         } catch (UnknownHostException ignored) {
         }
         return ip;
+    }
+
+    public static InetSocketAddress str2addr(String addr) {
+        int colon = addr.lastIndexOf(':');
+        return new InetSocketAddress(addr.substring(0, colon),
+                Integer.parseInt(addr.substring(colon + 1 )));
     }
 
     public static void main(String[] args) {
