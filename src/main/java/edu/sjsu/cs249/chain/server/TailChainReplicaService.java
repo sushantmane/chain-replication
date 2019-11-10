@@ -39,6 +39,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
     @Override
     public void increment(TailIncrementRequest req, StreamObserver<HeadResponse> rspObs) {
         HeadResponse.Builder rspBldr = HeadResponse.newBuilder();
+        rspBldr.setRc(0);
         rspObs.onNext(rspBldr.build());
         rspObs.onCompleted();
     }

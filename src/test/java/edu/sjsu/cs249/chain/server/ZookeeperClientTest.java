@@ -37,11 +37,8 @@ class ZookeeperClientTest {
         String data = "127.0.0.1:5144";
         System.out.println("Path: " + path);
         client.create(path, data, CreateMode.EPHEMERAL);
-        client.create(path+"0", data, CreateMode.EPHEMERAL);
-        client.create(path+"1", data, CreateMode.EPHEMERAL);
-        client.create(path+"2", data, CreateMode.EPHEMERAL);
         System.out.println(client.getOrderListOfChainNodes(chainRoot, true));
-        Thread.sleep(100000);
+        Thread.sleep(10000000000L);
     }
 
     @Test
