@@ -1,5 +1,7 @@
 package edu.sjsu.cs249.chain.client;
 
+import com.google.common.eventbus.EventBus;
+import com.google.common.eventbus.Subscribe;
 import edu.sjsu.cs249.chain.GetRequest;
 import edu.sjsu.cs249.chain.GetResponse;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc;
@@ -17,6 +19,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TailChainClient {
 
@@ -34,21 +39,35 @@ public class TailChainClient {
     private int cXid = 1; // client transaction id
     private int RETRIES = 10;
     private TailClientServer tcServer; // to handle messages from tail
+    private EventBus xidEventBus;
+
+    private ConcurrentMap<Integer, Boolean> xidResQue = new ConcurrentHashMap<>();
 
     public TailChainClient(String zkAddress, String root, String host, int port) {
+        this();
         this.port = port;
         this.root = root;
         this.host = host;
         this.zk = new ZookeeperClient(zkAddress, root);
-        this.tcServer = new TailClientServer(port);
+        this.tcServer = new TailClientServer(xidEventBus, port, xidResQue);
+        this.xidEventBus.register(this);
     }
 
-    public void connectToZk() throws IOException, InterruptedException {
+    private TailChainClient() {
+        xidEventBus = new EventBus();
+    }
+
+    public void init() throws IOException, InterruptedException {
+        startTcServer();
+        connectToZk();
+    }
+
+    private void connectToZk() throws IOException, InterruptedException {
         zk.connect();
         sid = zk.getSessionId();
     }
 
-    public void startTcServer() throws IOException {
+    private void startTcServer() throws IOException {
         tcServer.start();
     }
 
@@ -62,6 +81,13 @@ public class TailChainClient {
 
     private int getCXid() {
         return cXid++;
+    }
+
+    private AtomicBoolean xidRecvd = new AtomicBoolean(false);
+
+    @Subscribe
+    public void receiveXidEvents(XidProcessed xidProcessed) {
+        xidRecvd.set(true);
     }
 
     private TailChainReplicaBlockingStub getStub(String znode) throws KeeperException, InterruptedException {
@@ -116,12 +142,23 @@ public class TailChainClient {
             LOG.error("TailChainClient server is down. Aborting request.");
             return new Response(Response.Code.EABORT, key);
         }
+        int xid = 98473625;
+        xidResQue.put(xid, false);
+//        while (!xidRecvd.compareAndSet(true, false)) {
+        while (!xidResQue.get(xid)) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                // ignore
+            }
+        }
+        xidResQue.remove(xid);
 
+        if (true) {
+            return new Response(Response.Code.SUCCESS, key);
+        }
 
-
-        System.out.println("tcs:isTerm?" + tcServer.isTerminated());
-        System.out.println("tcs:isTerm?" + tcServer.isTerminated());
-
+        //todo: under dev
         TailIncrementRequest req = TailIncrementRequest.newBuilder()
                 .setKey(key)
                 .setIncrValue(value)
@@ -129,7 +166,6 @@ public class TailChainClient {
                 .setPort(port)
                 .setCxid(getCXid())
                 .build();
-
         //todo: remove
         if (headStub == null) {
             return new Response(Response.Code.EFAULT, key);

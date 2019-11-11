@@ -91,10 +91,11 @@ public class ClientMain {
         String host = getHost();
         // *** start services ***
         clientLib = new TailChainClient(zkAddr, root, host, port); // client library object
-        clientLib.startTcServer();       // start TailClientService server
-        System.out.println("Connecting to zookeeper service...");
-        clientLib.connectToZk();
-        System.out.println("Zookeeper connection established");
+//        clientLib.startTcServer();       // start TailClientService server
+//        System.out.println("Connecting to zookeeper service...");
+//        clientLib.connectToZk();
+//        System.out.println("Zookeeper connection established");
+        clientLib.init();
     }
 
     private String getHost() {

@@ -1,11 +1,13 @@
 package edu.sjsu.cs249.chain.client;
 
+import com.google.common.eventbus.EventBus;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 public class TailClientServer {
@@ -14,8 +16,10 @@ public class TailClientServer {
 
     private Server server;
 
-    public TailClientServer(int port) {
-        server = ServerBuilder.forPort(port).addService(new TailClientService()).build();
+    public TailClientServer(EventBus eventBus, int port, ConcurrentMap<Integer, Boolean> map) {
+        server = ServerBuilder.forPort(port)
+                .addService(new TailClientService(eventBus, map))
+                .build();
     }
 
     private TailClientServer() {}
