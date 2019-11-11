@@ -2,7 +2,7 @@ package edu.sjsu.cs249.chain.client;
 
 public class Response {
 
-    enum Code {
+    public enum Code {
         SUCCESS, // operations successful
         ECHNMTY,  // chain empty
         ENOKEY,  // no such key

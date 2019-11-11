@@ -79,6 +79,7 @@ public class ZookeeperClient implements Watcher {
             // session established, open connect latch
             connLatch.countDown();
         }
+
         try {
             updateContext();
         } catch (KeeperException | InterruptedException e) {

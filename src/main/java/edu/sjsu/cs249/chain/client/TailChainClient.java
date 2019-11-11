@@ -22,13 +22,13 @@ public class TailChainClient {
     private ZookeeperClient zk;
     private TailChainReplicaBlockingStub headStub;
     private TailChainReplicaBlockingStub tailStub;
-    // ip address and port number of host on which it
-    // will listen for messages from tail replica node
-    private String host;
-    private int port;
-    private long sid;
-    private String root;
-    private int cXid = 0; // client transaction id
+
+    private String host; // ip address of this client
+    private int port;    // port on which client will listen for messages from tail
+    private long sid;    // zookeeper session id
+    private String root; // zookeeper chain replica root znode
+    private int cXid = 1; // client transaction id
+    private int RETRIES = 10;
 
     public TailChainClient(String zkAddress, String root, String host, int port) {
         this.port = port;
@@ -64,7 +64,7 @@ public class TailChainClient {
      * Get the value to which the specified key is mapped.
      * @param key key for which the value is to be retrieved
      */
-    public void get(String key) throws KeeperException, InterruptedException {
+    public Response get(String key) throws KeeperException, InterruptedException {
         //todo: update following code
         zk.updateContext();
         System.out.println("tail: " + zk.getTailReplica());
@@ -88,6 +88,7 @@ public class TailChainClient {
         if (rc == 2) {
             System.err.println("Key " + key + " does not exist.");
         }
+        return new Response(key, Response.Code.SUCCESS);
     }
 
     /**
@@ -97,13 +98,13 @@ public class TailChainClient {
      *              If key does not exist, it will be created with this value.
      *              Negative value will decrement the value by value.
      */
-    public void increment(String key, int value) {
+    public Response increment(String key, int value) {
         TailIncrementRequest req = TailIncrementRequest.newBuilder()
                 .setKey(key)
                 .setIncrValue(value)
                 .setHost(host)
                 .setPort(port)
-                .setCxid(getCxid())
+                .setCxid(getCXid())
                 .build();
         int rc;
         do {
@@ -116,13 +117,14 @@ public class TailChainClient {
         } while (rc != 0);
 
         // todo: wait for response from the tail
+        return new Response(key, Response.Code.SUCCESS);
     }
 
     /**
      * Removes the entry for the specified key.
      * @param key
      */
-    public void delete(String key) throws KeeperException, InterruptedException {
+    public Response delete(String key) throws KeeperException, InterruptedException {
         //todo: update following code
         zk.updateContext();
         System.out.println("head: " + zk.getHeadReplica());
@@ -132,25 +134,29 @@ public class TailChainClient {
                 .setKey(key)
                 .setHost(host)
                 .setPort(port)
-                .setCxid(getCxid())
+                .setCxid(getCXid())
                 .build();
         int rc = -1;
+        int retry = 0;
         do {
             try {
                 rc = headStub.delete(req).getRc();
             } catch (StatusRuntimeException e) {
                 // todo: decide action, probably retry with latest head information
                 System.err.println("GRPC StatusCode: " + e.getStatus().getCode());
+                continue;
             }
             if (rc != 0) {
                 System.out.println("The head has been changed. Retrying...");
                 // todo: check need to invoke updateContext() before proceeding
             }
-        } while (rc != 0);
+        } while (rc != 0 && retry++ < RETRIES);
         // todo: wait for response from the tail
+
+        return new Response(key, Response.Code.SUCCESS);
     }
 
-    private int getCxid() {
-        return ++cXid;
+    private int getCXid() {
+        return cXid++;
     }
 }
