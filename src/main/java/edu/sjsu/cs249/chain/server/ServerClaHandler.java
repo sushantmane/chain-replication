@@ -5,6 +5,7 @@ import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
+import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
@@ -20,6 +21,8 @@ public class ServerClaHandler {
     static final String PORT = "p";
     static final String ZROOT = "r";
     static final String ORACLE = "z";
+    static final String NIF = "nif";
+    static final String HOST = "host";
 
     public static CommandLine parse(String[] args) {
         /**
@@ -69,7 +72,7 @@ public class ServerClaHandler {
                 .longOpt("help")
                 .build());
         options.addOption(Option.builder(PORT)
-                .desc("port on which to start replication service")
+                .desc("port on which server will bind")
                 .hasArg()
                 .longOpt("port")
                 .required()
@@ -89,6 +92,20 @@ public class ServerClaHandler {
                 .hasArg()
                 .argName("root-znode")
                 .build());
+        OptionGroup hostOptions = new OptionGroup();
+        hostOptions.addOption(Option.builder()
+                .desc("IP on which server will bind")
+                .hasArg()
+                .longOpt(HOST)
+                .argName("host-ip")
+                .build());
+        hostOptions.addOption(Option.builder()
+                .desc("network interface on which server will bind")
+                .hasArg()
+                .longOpt(NIF)
+                .argName("net-interface")
+                .build());
+        options.addOptionGroup(hostOptions);
         return options;
     }
 

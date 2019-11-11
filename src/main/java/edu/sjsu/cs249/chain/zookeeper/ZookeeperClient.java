@@ -66,16 +66,16 @@ public class ZookeeperClient implements Watcher {
     }
 
     @Override
-    public void process(WatchedEvent watchedEvent) {
-        LOG.info("New notification - type: {} state: {}", watchedEvent.getType(),
-                watchedEvent.getState().toString());
-        if (watchedEvent.getState() == Event.KeeperState.Expired
-                || watchedEvent.getState() == Event.KeeperState.Closed) {
-            LOG.info("Stopping zookeeper. Cause: " + watchedEvent.getState().toString());
+    public void process(WatchedEvent event) {
+        LOG.debug("New notification - type: {} state: {}", event.getType(),
+                event.getState().toString());
+        if (event.getState() == Event.KeeperState.Expired
+                || event.getState() == Event.KeeperState.Closed) {
+            LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
             // exit on session expiration
             System.exit(2);
         }
-        if (mySid == 0 && watchedEvent.getState() == Event.KeeperState.SyncConnected) {
+        if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
             // session established, open connect latch
             connLatch.countDown();
         }
@@ -130,6 +130,13 @@ public class ZookeeperClient implements Watcher {
     public String create(String node, String data, CreateMode mode)
             throws KeeperException, InterruptedException {
         return zk.create(node, data.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, mode);
+    }
+
+    // create a ephemeral node for given sessionId and set data for it
+    public String createEphZnode(long sessionId, String data)
+            throws KeeperException, InterruptedException {
+        String node = root + "/" + Utils.getHexSid(zk.getSessionId());
+        return create(node, data, CreateMode.EPHEMERAL);
     }
 
     // get data of the node

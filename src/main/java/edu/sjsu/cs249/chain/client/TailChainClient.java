@@ -12,11 +12,15 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
 import org.apache.zookeeper.KeeperException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 
 public class TailChainClient {
+
+    private static final Logger LOG = LoggerFactory.getLogger(TailChainClient.class);
 
     private ManagedChannel channel;
     private ZookeeperClient zk;
@@ -29,26 +33,35 @@ public class TailChainClient {
     private String root; // zookeeper chain replica root znode
     private int cXid = 1; // client transaction id
     private int RETRIES = 10;
+    private TailClientServer tcServer; // to handle messages from tail
 
     public TailChainClient(String zkAddress, String root, String host, int port) {
         this.port = port;
         this.root = root;
         this.host = host;
         this.zk = new ZookeeperClient(zkAddress, root);
+        this.tcServer = new TailClientServer(port);
     }
 
     public void connectToZk() throws IOException, InterruptedException {
         zk.connect();
         sid = zk.getSessionId();
-        System.out.println("Client connected to zookeeper service. sid: " + sid);
     }
 
-    private String sidToZNode(long sessionId) {
+    public void startTcServer() throws IOException {
+        tcServer.start();
+    }
+
+    private String sidToZNodeAbsPath(long sessionId) {
         return root + "/" + Utils.getHexSid(sessionId);
     }
 
     private String getAbsPath(String hexSid) {
         return root + "/" + hexSid;
+    }
+
+    private int getCXid() {
+        return cXid++;
     }
 
     private TailChainReplicaBlockingStub getStub(String znode) throws KeeperException, InterruptedException {
@@ -60,6 +73,8 @@ public class TailChainClient {
         return TailChainReplicaGrpc.newBlockingStub(ch);
     }
 
+    // ***** CLIENT APIs *****
+
     /**
      * Get the value to which the specified key is mapped.
      * @param key key for which the value is to be retrieved
@@ -67,10 +82,7 @@ public class TailChainClient {
     public Response get(String key) throws KeeperException, InterruptedException {
         //todo: update following code
         zk.updateContext();
-        System.out.println("tail: " + zk.getTailReplica());
         tailStub = getStub(zk.getTailReplica());
-
-
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
         GetResponse rsp;
         int rc = 1;
@@ -82,13 +94,14 @@ public class TailChainClient {
                 // todo: check need to invoke updateContext() before proceeding
             }
         } while (rc == 1);
+
         if (rc == 0) {
-            System.out.println("key: " + key + " value: " + rsp.getValue());
+            return new Response(Response.Code.SUCCESS, key, rsp.getValue());
         }
         if (rc == 2) {
-            System.err.println("Key " + key + " does not exist.");
+            return new Response(Response.Code.ENOKEY, key);
         }
-        return new Response(key, Response.Code.SUCCESS);
+        return new Response(Response.Code.EFAULT, key);
     }
 
     /**
@@ -99,6 +112,16 @@ public class TailChainClient {
      *              Negative value will decrement the value by value.
      */
     public Response increment(String key, int value) {
+        if (tcServer.isTerminated()) {
+            LOG.error("TailChainClient server is down. Aborting request.");
+            return new Response(Response.Code.EABORT, key);
+        }
+
+
+
+        System.out.println("tcs:isTerm?" + tcServer.isTerminated());
+        System.out.println("tcs:isTerm?" + tcServer.isTerminated());
+
         TailIncrementRequest req = TailIncrementRequest.newBuilder()
                 .setKey(key)
                 .setIncrValue(value)
@@ -106,6 +129,12 @@ public class TailChainClient {
                 .setPort(port)
                 .setCxid(getCXid())
                 .build();
+
+        //todo: remove
+        if (headStub == null) {
+            return new Response(Response.Code.EFAULT, key);
+        }
+
         int rc;
         do {
             rc = headStub.increment(req).getRc();
@@ -117,7 +146,7 @@ public class TailChainClient {
         } while (rc != 0);
 
         // todo: wait for response from the tail
-        return new Response(key, Response.Code.SUCCESS);
+        return new Response(Response.Code.SUCCESS, key);
     }
 
     /**
@@ -125,6 +154,11 @@ public class TailChainClient {
      * @param key
      */
     public Response delete(String key) throws KeeperException, InterruptedException {
+        if (tcServer.isTerminated()) {
+            LOG.error("TailChainClient server is down. Aborting request.");
+            return new Response(Response.Code.EABORT, key);
+        }
+
         //todo: update following code
         zk.updateContext();
         System.out.println("head: " + zk.getHeadReplica());
@@ -153,10 +187,6 @@ public class TailChainClient {
         } while (rc != 0 && retry++ < RETRIES);
         // todo: wait for response from the tail
 
-        return new Response(key, Response.Code.SUCCESS);
-    }
-
-    private int getCXid() {
-        return cXid++;
+        return new Response(Response.Code.SUCCESS, key);
     }
 }

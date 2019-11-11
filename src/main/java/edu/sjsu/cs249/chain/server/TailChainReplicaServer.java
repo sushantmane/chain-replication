@@ -5,11 +5,9 @@
 
 package edu.sjsu.cs249.chain.server;
 
-import edu.sjsu.cs249.chain.util.Utils;
 import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,52 +21,43 @@ public class TailChainReplicaServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailChainReplicaServer.class);
     private Server server;
-    private int port;
     private ZookeeperClient zk;
-    private TailChainReplicaService replService;
+    private String ip;
 
-    public TailChainReplicaServer(String zkAddress, String chainRoot, int port) {
+    public TailChainReplicaServer(String zkAddress, String chainRoot, String ip, int port) {
         this.zk = new ZookeeperClient(zkAddress, chainRoot);
-        this.port = port;
-        this.replService = new TailChainReplicaService(zk);
-        this.server = ServerBuilder.forPort(port).addService(this.replService).build();
+        this.ip = ip;
+        this.server = ServerBuilder.forPort(port)
+                .addService(new TailChainReplicaService(zk))
+                .build();
     }
 
     public void start() throws IOException, InterruptedException, KeeperException {
-        // connect to zookeeper service
-        zk.connect();
-        // start gRPC server
-        server.start();
-        LOG.info("Server started successfully on the port: {}", port);
-        // register a shutdown hook to stop gRPC daemon threads gracefully on JVM shutdown
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOG.info("Server shutdown is in progress...");
-            TailChainReplicaServer.this.stop();
-            LOG.info("Server has been stopped successfully.");
-        }));
+        zk.connect();       // connect to zookeeper service
+        server.start();     // start gRPC server
+        LOG.info("Server started on {}:{}", ip, server.getPort());
+        System.out.println("Server started on " + ip + ":" + server.getPort());
+        // add a shutdown hook to stop gRPC daemon threads gracefully on JVM shutdown
+        Runtime.getRuntime().addShutdownHook(new Thread(TailChainReplicaServer.this::stop));
         // register this replica in zookeeper
-        String chainRoot = "/tail-chain";
         registerReplica();
         // wait for the gRPC server to become terminated
         server.awaitTermination();
     }
 
-    // should be handled in another class
     private void registerReplica() throws KeeperException, InterruptedException {
-        String data = Utils.getLocalhost() + ":" + port;
-        String name = zk.getRoot() + "/" + Utils.getHexSid(zk.getSessionId());
-        LOG.info("Registering replica with zookeeper - name: {} data: {}", name, data);
-        String path = zk.create(name, data, CreateMode.EPHEMERAL);
-        LOG.info("Replica {} registered successfully with zookeeper.", path);
+        String data = ip + ":" + server.getPort();
+        String path = zk.createEphZnode(zk.getSessionId(), data);
+        LOG.info("Replica {} registered with zookeeper. ReplicaInfo: {}", path, data);
     }
 
     // initiate graceful shutdown of the gRPC server
     private void stop() {
-        // disconnect zookeeper
-        zk.closeConnection();
-        // stop grpc server
+        LOG.info("Server shutdown is in progress...");
+        zk.closeConnection();       // disconnect zookeeper
         if (server != null) {
-            server.shutdown();
+            server.shutdown();      // stop grpc server
         }
+        System.out.println("Server has been stopped.");
     }
 }

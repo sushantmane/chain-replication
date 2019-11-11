@@ -12,8 +12,8 @@ import java.util.Scanner;
  */
 public class ClientMain {
 
-    private TailChainClient client;
-    private CommandLine cli;
+    private TailChainClient clientLib;
+    private CommandLine cmd;
 
     private String getUsageStr() {
         String str = "\n"
@@ -24,7 +24,8 @@ public class ClientMain {
         return str;
     }
 
-    private void repl() {
+    // interactive command prompt
+    private void repl() throws KeeperException, InterruptedException {
         System.out.println(getUsageStr());
         Scanner scanner = new Scanner(System.in);
         String line;
@@ -34,7 +35,7 @@ public class ClientMain {
             if (line.trim().length() == 0) {
                 continue;
             }
-            String input[] = line.split(" ");
+            String[] input = line.split(" ");
             String op = input[0];
             String key;
             int val;
@@ -44,11 +45,7 @@ public class ClientMain {
                         System.err.println("Missing arguments");
                         break;
                     }
-                    key = input[1];
-                    // todo: call get api
-                    val = 2812;
-                    System.out.println(val);
-                    // handle tail change
+                    responseHandler("get", clientLib.get(input[1]));
                     break;
                 case "inc":
                     if (input.length < 3) {
@@ -63,18 +60,14 @@ public class ClientMain {
                         System.err.println("Value should be an integer");
                         break;
                     }
-                    // todo: call inc api
-                    System.out.println("status: " + "ok");
-                    // handle head change case
+                    responseHandler("inc", clientLib.increment(key, val));
                     break;
                 case "del":
                     if (input.length < 2) {
                         System.err.println("Missing arguments");
                         break;
                     }
-                    key = input[1];
-                    System.out.println("key deleted");
-                    // handle head change case
+                    responseHandler("del", clientLib.delete(input[1]));
                     break;
                 case "help":
                     System.out.println("Usage: get key | inc key value | del key | quit | help");
@@ -87,51 +80,33 @@ public class ClientMain {
         } while (true);
     }
 
-    private ClientMain(CommandLine cli) throws IOException, InterruptedException {
-        String zkAddr = cli.getOptionValue(ClientClaHandler.ORACLE);
-        String root = cli.getOptionValue(ClientClaHandler.ZROOT);
-        int port = Integer.parseInt(cli.getOptionValue(ClientClaHandler.PORT));
-        String host = getHost(cli);
-        client = new TailChainClient(zkAddr, root, host, port);
-        System.out.println("Connecting to zookeeper service...");
-        client.connectToZk();
-        System.out.println("Connection established.");
+    private ClientMain(CommandLine cmd) {
+        this.cmd = cmd;
     }
 
-    // todo: refactor
-    private static String getHost(CommandLine cli) {
+    private void initClientLib() throws IOException, InterruptedException {
+        String zkAddr = cmd.getOptionValue(ClientClaHandler.ORACLE);
+        String root = cmd.getOptionValue(ClientClaHandler.ZROOT);
+        int port = Integer.parseInt(cmd.getOptionValue(ClientClaHandler.PORT));
+        String host = getHost();
+        // *** start services ***
+        clientLib = new TailChainClient(zkAddr, root, host, port); // client library object
+        clientLib.startTcServer();       // start TailClientService server
+        System.out.println("Connecting to zookeeper service...");
+        clientLib.connectToZk();
+        System.out.println("Zookeeper connection established");
+    }
+
+    private String getHost() {
         String host;
-        if (cli.hasOption(ClientClaHandler.HOST)) {
-            host = cli.getOptionValue(ClientClaHandler.HOST);
-        } else if (cli.hasOption(ClientClaHandler.NIF)) {
-            host = Utils.getHostIp4Addr(cli.getOptionValue(ClientClaHandler.NIF));
+        if (cmd.hasOption(ClientClaHandler.HOST)) {
+            host = cmd.getOptionValue(ClientClaHandler.HOST);
+        } else if (cmd.hasOption(ClientClaHandler.NIF)) {
+            host = Utils.getHostIp4Addr(cmd.getOptionValue(ClientClaHandler.NIF));
         } else {
             host = Utils.getLocalhost();
         }
         return host;
-    }
-
-    private void run(CommandLine cli) throws KeeperException, InterruptedException {
-        if (cli.hasOption(ClientClaHandler.REPL)) {
-            repl();
-        } else if (cli.hasOption(ClientClaHandler.GET)) {
-            String key = cli.getOptionValue(ClientClaHandler.GET);
-            responseHandler("get", client.get(key));
-        } else if (cli.hasOption(ClientClaHandler.INCR)) {
-            String[] input = cli.getOptionValues(ClientClaHandler.INCR);
-            String key = input[0];
-            int val = 0;
-            try {
-                val = Integer.parseInt(input[1]);
-            } catch (NumberFormatException e) {
-                System.err.println("Value should be an integer");
-                System.exit(1);
-            }
-            responseHandler("inc", client.increment(key, val));
-        } else if (cli.hasOption(ClientClaHandler.DELETE)) {
-            String key = cli.getOptionValue(ClientClaHandler.DELETE);
-            responseHandler("del", client.delete(key));
-        }
     }
 
     private void responseHandler(String op, Response rsp) {
@@ -140,7 +115,11 @@ public class ClientMain {
             return;
         }
         if (rsp.getRc() == Response.Code.EFAULT) {
-            System.err.println("Error: Something went wrong");
+            System.err.println("Error: Something went wrong. Please check logs.");
+            return;
+        }
+        if (rsp.getRc() == Response.Code.EABORT) {
+            System.err.println("Error: Local server is down. Restart client.");
             return;
         }
         if (rsp.getRc() == Response.Code.ENOKEY) {
@@ -150,7 +129,7 @@ public class ClientMain {
 
         switch (op) {
             case "get":
-                System.out.println(rsp.getValue());
+                System.out.println(rsp.getKey() + ": "+ rsp.getValue());
                 break;
             case "del":
                 System.out.println("Key does not exist.");
@@ -163,10 +142,42 @@ public class ClientMain {
         }
     }
 
+    private void run() throws KeeperException, InterruptedException {
+        if (cmd.hasOption(ClientClaHandler.REPL)) {
+            repl();
+        }
+        if (cmd.hasOption(ClientClaHandler.GET)) {
+            String key = cmd.getOptionValue(ClientClaHandler.GET);
+            responseHandler("get", clientLib.get(key));
+        }
+        if (cmd.hasOption(ClientClaHandler.INCR)) {
+            String[] input = cmd.getOptionValues(ClientClaHandler.INCR);
+            String key = input[0];
+            int val = 0;
+            try {
+                val = Integer.parseInt(input[1]);
+            } catch (NumberFormatException e) {
+                System.err.println("Value should be an integer");
+                System.exit(1);
+            }
+            responseHandler("inc", clientLib.increment(key, val));
+        }
+        if (cmd.hasOption(ClientClaHandler.DELETE)) {
+            String key = cmd.getOptionValue(ClientClaHandler.DELETE);
+            responseHandler("del", clientLib.delete(key));
+        }
+    }
+
     // entry point for client
-    public static void main(String[] args) throws IOException, InterruptedException, KeeperException {
-        CommandLine cli = ClientClaHandler.parse(args);
-        ClientMain main = new ClientMain(cli);
-        main.run(cli);
+    public static void main(String[] args) {
+        CommandLine cmd = ClientClaHandler.parse(args);
+        ClientMain app = new ClientMain(cmd);
+        try {
+            app.initClientLib();
+            app.run();
+        } catch (InterruptedException | KeeperException | IOException e) {
+            System.err.println("Operation failed");
+            e.printStackTrace();
+        }
     }
 }
