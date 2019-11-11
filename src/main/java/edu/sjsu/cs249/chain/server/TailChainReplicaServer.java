@@ -53,16 +53,6 @@ public class TailChainReplicaServer {
         server.awaitTermination();
     }
 
-    // initiate graceful shutdown of the gRPC server
-    private void stop() {
-        // disconnect zookeeper
-        zk.closeConnection();
-        // stop grpc server
-        if (server != null) {
-            server.shutdown();
-        }
-    }
-
     // should be handled in another class
     private void registerReplica() throws KeeperException, InterruptedException {
         String data = Utils.getLocalhost() + ":" + port;
@@ -72,11 +62,13 @@ public class TailChainReplicaServer {
         LOG.info("Replica {} registered successfully with zookeeper.", path);
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException, KeeperException {
-        String zkAddress = "192.168.56.111:9999";
-        String chainRoot = "/tail-chain";
-        int port = 5144;
-        TailChainReplicaServer server = new TailChainReplicaServer(zkAddress, chainRoot, port);
-        server.start();
+    // initiate graceful shutdown of the gRPC server
+    private void stop() {
+        // disconnect zookeeper
+        zk.closeConnection();
+        // stop grpc server
+        if (server != null) {
+            server.shutdown();
+        }
     }
 }

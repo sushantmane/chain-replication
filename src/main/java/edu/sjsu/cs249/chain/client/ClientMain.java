@@ -1,7 +1,6 @@
 package edu.sjsu.cs249.chain.client;
 
 import edu.sjsu.cs249.chain.util.Utils;
-import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import org.apache.commons.cli.CommandLine;
 
 import java.io.IOException;
@@ -90,17 +89,13 @@ public class ClientMain {
         client.connectToZk();
     }
 
-    public ClientMain(String zkAddr, String root, String host, int port) {
+    private ClientMain(String zkAddr, String root, String host, int port) {
         client = new TailChainClient(zkAddr, root, host, port);
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException {
-        CommandLine cli = ClientClaHandler.parse(args);
-        String zkAddr = cli.getOptionValue(ClientClaHandler.ORACLE);
-        String root = cli.getOptionValue(ClientClaHandler.ZROOT);
-        int port = Integer.parseInt(cli.getOptionValue(ClientClaHandler.PORT));
-        String host = "";
-
+    // todo: refactor
+    private static String getHost(CommandLine cli) {
+        String host;
         if (cli.hasOption(ClientClaHandler.HOST)) {
             host = cli.getOptionValue(ClientClaHandler.HOST);
         } else if (cli.hasOption(ClientClaHandler.NIF)) {
@@ -108,11 +103,43 @@ public class ClientMain {
         } else {
             host = Utils.getLocalhost();
         }
+        return host;
+    }
 
+    // entry point for client
+    public static void main(String[] args) throws IOException, InterruptedException {
+        CommandLine cli = ClientClaHandler.parse(args);
+        String zkAddr = cli.getOptionValue(ClientClaHandler.ORACLE);
+        String root = cli.getOptionValue(ClientClaHandler.ZROOT);
+        int port = Integer.parseInt(cli.getOptionValue(ClientClaHandler.PORT));
+        String host = getHost(cli);
         ClientMain main = new ClientMain(zkAddr, root, host, port);
+        main.setup();
+
         if (cli.hasOption(ClientClaHandler.REPL)) {
             main.repl();
-            System.exit(0);
+        } else if (cli.hasOption(ClientClaHandler.GET)) {
+            String key = cli.getOptionValue(ClientClaHandler.GET);
+            // call get api
+            System.out.println("OP: GET key: " + key + " val: " + 434569834);
+        } else if (cli.hasOption(ClientClaHandler.INCR)) {
+            String[] input = cli.getOptionValues(ClientClaHandler.INCR);
+            String key = input[0];
+            int val = 0;
+            try {
+                val = Integer.parseInt(input[1]);
+            } catch (NumberFormatException e) {
+                System.err.println("Value should be an integer");
+                System.exit(1);
+            }
+            System.out.println("OP: INC key: " + key + " val: " + val);
+        } else if (cli.hasOption(ClientClaHandler.DELETE)) {
+            String key = cli.getOptionValue(ClientClaHandler.DELETE);
+            System.out.println("OP: DEL key: " + key);
         }
+    }
+
+    private void responseHandler(String op, Response rsp) {
+
     }
 }

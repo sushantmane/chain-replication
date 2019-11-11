@@ -2,7 +2,6 @@ package edu.sjsu.cs249.chain.client;
 
 import edu.sjsu.cs249.chain.GetRequest;
 import edu.sjsu.cs249.chain.GetResponse;
-import edu.sjsu.cs249.chain.HeadResponse;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc.TailChainReplicaBlockingStub;
 import edu.sjsu.cs249.chain.TailDeleteRequest;
@@ -11,6 +10,7 @@ import edu.sjsu.cs249.chain.util.Utils;
 import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.StatusRuntimeException;
 import org.apache.zookeeper.KeeperException;
 
 import java.io.IOException;
@@ -40,6 +40,7 @@ public class TailChainClient {
     public void connectToZk() throws IOException, InterruptedException {
         zk.connect();
         sid = zk.getSessionId();
+        System.out.println("Client connected to zookeeper service. sid: " + sid);
     }
 
     private String sidToZNode(long sessionId) {
@@ -54,7 +55,6 @@ public class TailChainClient {
         //get stub from cache
         byte data[] = zk.getData(getAbsPath(znode), false);
         String target = new String(data).split("\n")[0];
-        System.out.println("target: " + target);
         InetSocketAddress addr = Utils.str2addr(target);
         ManagedChannel ch = ManagedChannelBuilder.forTarget(target).usePlaintext().build();
         return TailChainReplicaGrpc.newBlockingStub(ch);
@@ -65,9 +65,12 @@ public class TailChainClient {
      * @param key key for which the value is to be retrieved
      */
     public void get(String key) throws KeeperException, InterruptedException {
+        //todo: update following code
         zk.updateContext();
         System.out.println("tail: " + zk.getTailReplica());
         tailStub = getStub(zk.getTailReplica());
+
+
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
         GetResponse rsp;
         int rc = 1;
@@ -100,7 +103,7 @@ public class TailChainClient {
                 .setIncrValue(value)
                 .setHost(host)
                 .setPort(port)
-                .setCxid(cXid)
+                .setCxid(getCxid())
                 .build();
         int rc;
         do {
@@ -112,14 +115,42 @@ public class TailChainClient {
             }
         } while (rc != 0);
 
-        // todo: wait for response from tail
+        // todo: wait for response from the tail
     }
 
     /**
      * Removes the entry for the specified key.
      * @param key
      */
-    public void delete(String key) {
-        TailDeleteRequest req
+    public void delete(String key) throws KeeperException, InterruptedException {
+        //todo: update following code
+        zk.updateContext();
+        System.out.println("head: " + zk.getHeadReplica());
+        headStub = getStub(zk.getHeadReplica());
+
+        TailDeleteRequest req = TailDeleteRequest.newBuilder()
+                .setKey(key)
+                .setHost(host)
+                .setPort(port)
+                .setCxid(getCxid())
+                .build();
+        int rc = -1;
+        do {
+            try {
+                rc = headStub.delete(req).getRc();
+            } catch (StatusRuntimeException e) {
+                // todo: decide action, probably retry with latest head information
+                System.err.println("GRPC StatusCode: " + e.getStatus().getCode());
+            }
+            if (rc != 0) {
+                System.out.println("The head has been changed. Retrying...");
+                // todo: check need to invoke updateContext() before proceeding
+            }
+        } while (rc != 0);
+        // todo: wait for response from the tail
+    }
+
+    private int getCxid() {
+        return ++cXid;
     }
 }

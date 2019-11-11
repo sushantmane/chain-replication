@@ -1,32 +1,25 @@
-package edu.sjsu.cs249.chain.client;
+package edu.sjsu.cs249.chain.server;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
-import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import java.io.PrintWriter;
 
 /**
- * Client Command Line Argument Handler
+ * Server Command Line Argument Handler
  */
-public class ClientClaHandler {
+public class ServerClaHandler {
 
-    static final String APPNAME = "ClientMain";
+    static final String APPNAME = "ServerMain";
     static final String HELP = "h";
     static final String PORT = "p";
     static final String ZROOT = "r";
-    static final String INCR = "inc";
-    static final String GET = "get";
-    static final String DELETE = "del";
     static final String ORACLE = "z";
-    static final String REPL = "repl";
-    static final String NIF = "nif";
-    static final String HOST = "host";
 
     public static CommandLine parse(String[] args) {
         /**
@@ -76,7 +69,7 @@ public class ClientClaHandler {
                 .longOpt("help")
                 .build());
         options.addOption(Option.builder(PORT)
-                .desc("client will listen on this port for messages from the tail replica")
+                .desc("port on which to start replication service")
                 .hasArg()
                 .longOpt("port")
                 .required()
@@ -96,47 +89,6 @@ public class ClientClaHandler {
                 .hasArg()
                 .argName("root-znode")
                 .build());
-        OptionGroup group = new OptionGroup();
-        group.addOption(Option.builder()
-                .desc("increment the value of given key by specified value")
-                .longOpt(INCR)
-                .argName("key value")
-                .numberOfArgs(2)
-                .valueSeparator(' ')
-                .build());
-        group.addOption(Option.builder()
-                .desc("get the value of given key")
-                .longOpt(GET)
-                .argName("key")
-                .numberOfArgs(1)
-                .build());
-        group.addOption(Option.builder()
-                .desc("remove the key from hashtable")
-                .longOpt(DELETE)
-                .argName("key")
-                .numberOfArgs(1)
-                .build());
-        group.addOption(Option.builder()
-                .desc("run client in interactive mode")
-                .longOpt(REPL)
-                .hasArg(false)
-                .build());
-        group.setRequired(true);
-        options.addOptionGroup(group);
-        OptionGroup hostOptions = new OptionGroup();
-        hostOptions.addOption(Option.builder()
-                .desc("host ip on which client will hear back from tail")
-                .hasArg()
-                .longOpt(HOST)
-                .argName("host-ip")
-                .build());
-        hostOptions.addOption(Option.builder()
-                .desc("network interface on which client will hear back from tail")
-                .hasArg()
-                .longOpt(NIF)
-                .argName("net-interface")
-                .build());
-        options.addOptionGroup(hostOptions);
         return options;
     }
 
