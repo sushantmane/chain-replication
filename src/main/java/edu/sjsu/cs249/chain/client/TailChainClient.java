@@ -44,12 +44,12 @@ public class TailChainClient {
         this.tcServer = new TailClientServer(xidResponseQue, port);
     }
 
-    public void init() throws IOException, InterruptedException {
+    public void init() throws IOException, InterruptedException, KeeperException {
         startTcServer();
         connectToZk();
     }
 
-    public void connectToZk() throws IOException, InterruptedException {
+    public void connectToZk() throws IOException, InterruptedException, KeeperException {
         zk.connect();
     }
 

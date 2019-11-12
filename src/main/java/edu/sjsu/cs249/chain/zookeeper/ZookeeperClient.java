@@ -15,12 +15,15 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ZookeeperClient implements Watcher {
 
     private static final Logger LOG = LoggerFactory.getLogger(ZookeeperClient.class);
-    private static final int TIMEOUT = 30000;
+    private static final int TIMEOUT = 15000;
 
     private ZooKeeper zk;
     private String connectString;
@@ -31,6 +34,7 @@ public class ZookeeperClient implements Watcher {
     private AtomicLong successorSid = new AtomicLong(-1);
     private AtomicLong headSid = new AtomicLong(-1);
     private AtomicLong tailSid = new AtomicLong(-1);
+    private AtomicBoolean updateCtx = new AtomicBoolean(false);
 
     public ZookeeperClient(String connectString, String root) {
         this.connectString = connectString;
@@ -42,13 +46,28 @@ public class ZookeeperClient implements Watcher {
     }
 
     // connect to zookeeper server and establish a session
-    public void connect() throws IOException, InterruptedException {
+    public void connect() throws IOException, InterruptedException, KeeperException {
+        System.out.println("Connecting to zookeeper server...");
         LOG.info("Connecting to zookeeper server...");
         zk = new ZooKeeper(connectString, TIMEOUT,this);
         // wait for session establishment
         connLatch.await();
         mySid = zk.getSessionId();
         LOG.info("Connected to zookeeper server. SessionId: {}", mySid);
+        System.out.println("Connected to zookeeper server");
+        if (!isValidRoot()) {
+            LOG.error("Invalid zRoot: {}", root);
+            throw new KeeperException.NoNodeException();
+        }
+    }
+
+    private boolean isValidRoot() throws KeeperException, InterruptedException {
+        return exists(root, true);
+    }
+
+    void startUpdateThread() {
+        Executors.newSingleThreadScheduledExecutor()
+                .scheduleAtFixedRate(this::updateContext, 0, 3, TimeUnit.MILLISECONDS);
     }
 
     public long getSessionId() {
@@ -66,9 +85,14 @@ public class ZookeeperClient implements Watcher {
     }
 
     // update roles of nodes in chain
-    public void updateContext() throws KeeperException, InterruptedException {
-        // todo: replace with chain root
-        List<Long> sids = getOrderListOfChainNodes("/tail-chain", true);
+    public void updateContext() {
+        List<Long> sids = new ArrayList<>();
+        try {
+            sids = getOrderListOfChainNodes(root, true);
+        } catch (KeeperException | InterruptedException ignore) {
+            LOG.error("Exception: ", ignore);
+        }
+        // this should not be case on replica server
         if (sids.size() == 0) {
             return;
         }
@@ -207,7 +231,7 @@ public class ZookeeperClient implements Watcher {
 
     @Override
     public void process(WatchedEvent event) {
-        System.out.println("Notification: " + Thread.currentThread().getName());
+//        System.out.println("Notification: " + Thread.currentThread().getName());
         LOG.debug("New notification - type: {} state: {}", event.getType(),
                 event.getState().toString());
         if (event.getState() == Event.KeeperState.Expired
@@ -219,27 +243,12 @@ public class ZookeeperClient implements Watcher {
         if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
             // session established, open connect latch
             connLatch.countDown();
-        }
-
-        if (event.getType() == Event.EventType.NodeCreated) {
-            System.out.println("NodeCreated");
-        }
-
-        // A watch is set with a call to exists.
-        if (event.getType() == Event.EventType.NodeDeleted) {
-            System.out.println("NodeDeleted");
+            updateContext();
         }
         if (event.getType() == Event.EventType.NodeChildrenChanged) {
-            System.out.println("NodeChildrenChanged");
-        }
-        if (event.getState() == Event.KeeperState.Disconnected) {
-            System.out.println("Disconnected");
-        }
-
-        try {
+            LOG.info("Event: NodeChildrenChanged");
+            // must update context
             updateContext();
-        } catch (KeeperException | InterruptedException e) {
-            // failed to update context; retry
         }
     }
 }

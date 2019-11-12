@@ -84,7 +84,7 @@ public class ClientMain {
         this.cmd = cmd;
     }
 
-    private void initClientLib() throws IOException, InterruptedException {
+    private void initClientLib() throws IOException, InterruptedException, KeeperException {
         String zkAddr = cmd.getOptionValue(ClientClaHandler.ORACLE);
         String root = cmd.getOptionValue(ClientClaHandler.ZROOT);
         int port = Integer.parseInt(cmd.getOptionValue(ClientClaHandler.PORT));
@@ -176,9 +176,8 @@ public class ClientMain {
         try {
             app.initClientLib();
             app.run();
-        } catch (InterruptedException | KeeperException | IOException e) {
-            System.err.println("Operation failed");
-            e.printStackTrace();
+        } catch (KeeperException | InterruptedException | IOException e) {
+            System.err.println("ERROR: " + e.getMessage());
         }
     }
 }

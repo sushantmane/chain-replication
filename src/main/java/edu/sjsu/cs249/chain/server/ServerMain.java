@@ -21,13 +21,17 @@ public class ServerMain {
         return host;
     }
 
-    public static void main(String[] args) throws InterruptedException, IOException, KeeperException {
+    public static void main(String[] args) {
         CommandLine cli = ServerClaHandler.parse(args);
         String zkAddr = cli.getOptionValue(ServerClaHandler.ORACLE);
         String root = cli.getOptionValue(ServerClaHandler.ZROOT);
         int port = Integer.parseInt(cli.getOptionValue(ServerClaHandler.PORT));
         String ip = getHost(cli);
         TailChainReplicaServer server = new TailChainReplicaServer(zkAddr, root, ip, port);
-        server.start();
+        try {
+            server.start();
+        } catch (KeeperException | InterruptedException | IOException e) {
+            System.err.println("ERROR: " + e.getMessage());
+        }
     }
 }
