@@ -89,6 +89,9 @@ public class TailChainClient {
         if (stub != null) {
             ManagedChannel ch = (ManagedChannel) stub.getChannel();
             ch.shutdown();
+            if (!ch.isTerminated()) {
+                ch.shutdownNow(); // todo: figure out better way for handling this
+            }
             stub = null;
         }
     }
@@ -118,9 +121,12 @@ public class TailChainClient {
             setChainHead(zk.getHeadSid());
             setChainTail(zk.getTailSid());
         } catch (Exception e) {
-            LOG.debug("Failed to create stub. Exp: ", e);
-            System.err.println("ERROR: Chain is empty or some znodes might have corrupt data.");
-            System.exit(1);
+            // todo: can we handle this in a better way?
+            LOG.debug("Failed to create stub. Exp: {}", e.getMessage());
+//            System.err.println("ERROR: Chain is empty or some znodes might have corrupt data.");
+//            System.exit(1);
+            headStub = null;
+            tailStub = null;
         }
     }
 
@@ -147,6 +153,9 @@ public class TailChainClient {
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
         int attempt = 0;
         do {
+            if (isChainEmpty()) {
+                return new Response(Response.Code.ECHNMTY, key);
+            }
             try {
                 GetResponse rsp = tailStub.get(request);
                 int rc = rsp.getRc();
@@ -219,9 +228,9 @@ public class TailChainClient {
                 LOG.error("TailChainClient server is down. Aborting request.");
                 return new Response(Response.Code.EABORT, key);
             }
-//            if (isChainEmpty()) {
-//                return new Response(Response.Code.ECHNMTY, key);
-//            }
+            if (isChainEmpty()) {
+                return new Response(Response.Code.ECHNMTY, key);
+            }
             try {
                 HeadResponse rsp;
                 if (op == OpCode.DEL) {
