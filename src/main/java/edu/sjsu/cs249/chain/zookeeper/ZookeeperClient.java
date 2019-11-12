@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ZookeeperClient implements Watcher {
@@ -34,7 +33,6 @@ public class ZookeeperClient implements Watcher {
     private AtomicLong successorSid = new AtomicLong(-1);
     private AtomicLong headSid = new AtomicLong(-1);
     private AtomicLong tailSid = new AtomicLong(-1);
-    private AtomicBoolean updateCtx = new AtomicBoolean(false);
 
     public ZookeeperClient(String connectString, String root) {
         this.connectString = connectString;
@@ -59,15 +57,11 @@ public class ZookeeperClient implements Watcher {
             LOG.error("Invalid zRoot: {}", root);
             throw new KeeperException.NoNodeException();
         }
+        runPrintMyCtxThread();
     }
 
     private boolean isValidRoot() throws KeeperException, InterruptedException {
         return exists(root, true);
-    }
-
-    void startUpdateThread() {
-        Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(this::updateContext, 0, 3, TimeUnit.MILLISECONDS);
     }
 
     public long getSessionId() {
@@ -84,42 +78,8 @@ public class ZookeeperClient implements Watcher {
         }
     }
 
-    // update roles of nodes in chain
-    public void updateContext() {
-        List<Long> sids = new ArrayList<>();
-        try {
-            sids = getOrderListOfChainNodes(root, true);
-        } catch (KeeperException | InterruptedException ignore) {
-            LOG.error("Exception: ", ignore);
-        }
-        // this should not be case on replica server
-        if (sids.size() == 0) {
-            return;
-        }
-        headSid.set(sids.get(0));
-        tailSid.set(sids.get(sids.size() - 1));
-        // position of this replica in chain
-        int myIndex = sids.indexOf(mySid);
-        // if client is calling this method
-        if (myIndex == -1) {
-            return;
-        }
-        // except head replica all other nodes have predecessor replica
-        if (myIndex == 0) {
-            predecessorSid.set(-1); // -1 indicates no predecessor
-        } else {
-            predecessorSid.set(sids.get(myIndex - 1));
-        }
-        // except tail replica all other nodes have successor replica
-        if (myIndex == sids.size() - 1) {
-            successorSid.set(-1); // -1 indicates no successor
-        } else {
-            successorSid.set(sids.get(myIndex + 1));
-        }
-    }
-
     // return true if node exists
-    public boolean exists(String path, boolean watch)
+    private boolean exists(String path, boolean watch)
             throws KeeperException, InterruptedException {
         Stat stat = zk.exists(path, watch);
         if (stat == null) {
@@ -129,7 +89,7 @@ public class ZookeeperClient implements Watcher {
     }
 
     // create a node and set data for it
-    public String create(String node, String data, CreateMode mode)
+    private String create(String node, String data, CreateMode mode)
             throws KeeperException, InterruptedException {
         return zk.create(node, data.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, mode);
     }
@@ -148,7 +108,7 @@ public class ZookeeperClient implements Watcher {
     }
 
     // get children of the node represented by path
-    public List<String> getChildren(String path, boolean watch)
+    private List<String> getChildren(String path, boolean watch)
             throws KeeperException, InterruptedException {
         return zk.getChildren(path, watch);
     }
@@ -169,7 +129,7 @@ public class ZookeeperClient implements Watcher {
     }
 
     // returns sorted list of children of given node
-    protected List<Long> getOrderListOfChainNodes(String path, boolean watch)
+    private List<Long> getOrderListOfChainNodes(String path, boolean watch)
             throws KeeperException, InterruptedException {
         List<String> children = getChildren(path, watch);
         List<Long> sessionIds = new ArrayList<>();
@@ -194,8 +154,24 @@ public class ZookeeperClient implements Watcher {
         return sid == predecessorSid.get();
     }
 
+    public long getPredecessor() {
+        return predecessorSid.get();
+    }
+
+    public long getSuccessor() {
+        return successorSid.get();
+    }
+
     public boolean isHead(long sid) {
         return sid == headSid.get();
+    }
+
+    public boolean amIHead() {
+        return isHead(mySid);
+    }
+
+    public boolean amITail() {
+        return isTail(mySid);
     }
 
     public boolean isTail(long sid) {
@@ -206,8 +182,93 @@ public class ZookeeperClient implements Watcher {
         return Utils.getHexSid(headSid.get());
     }
 
+    public long getHeadSid() {
+        return headSid.get();
+    }
+
+    public long getTailSid() {
+        return tailSid.get();
+    }
+
     public String getTailReplica() {
         return Utils.getHexSid(tailSid.get());
+    }
+
+    // update roles of nodes in chain
+    public void updateContext() {
+        LOG.debug("Updating context...");
+        List<Long> sids;
+        try {
+            sids = getOrderListOfChainNodes(root, true);
+        } catch (KeeperException | InterruptedException ignore) {
+            LOG.error("Failed to update context.Exception: ", ignore);
+            return;
+        }
+        // this should not be case on replica server
+        if (sids.size() == 0) {
+            // head = tail = -1 = chain empty :: used by TailChainClient
+            headSid.set(-1);
+            tailSid.set(-1);
+            return;
+        }
+        headSid.set(sids.get(0));
+        tailSid.set(sids.get(sids.size() - 1));
+        // position of this replica in chain
+        int myIndex = sids.indexOf(mySid);
+        // if client is calling this method
+        if (myIndex == -1) {
+            return;
+        }
+        // except head replica all other nodes have predecessor replica
+        if (myIndex == 0) {
+            predecessorSid.set(-1); // -1 indicates no predecessor
+        } else {
+            predecessorSid.set(sids.get(myIndex - 1));
+        }
+        // except tail replica all other nodes have successor replica
+        if (myIndex == sids.size() - 1) {
+            successorSid.set(-1); // -1 indicates no successor
+        } else {
+            successorSid.set(sids.get(myIndex + 1));
+        }
+    }
+
+    @Override
+    public void process(WatchedEvent event) {
+        System.out.println("Notification: " + Thread.currentThread().getName());
+        LOG.debug("New notification - type: {} state: {}", event.getType(),
+                event.getState().toString());
+        if (event.getState() == Event.KeeperState.Expired
+                || event.getState() == Event.KeeperState.Closed) {
+            LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
+            // exit on session expiration
+            System.exit(2);
+        }
+        if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
+            // session established, open connect latch
+            connLatch.countDown();
+            updateContext();
+        }
+
+        if (event.getType() == Event.EventType.NodeChildrenChanged) {
+            LOG.info("Event: NodeChildrenChanged");
+            // must update context
+            updateContext();
+            // todo: call set watch if updateContext() fails in getChildren
+        }
+    }
+
+    // *** USED FOR TESTING ONLY ***
+    private void printDebug() {
+        LOG.debug("My:{} Head:{} Tail:{} Pred:{} Succ:{} amIHead:{} amITail:{}",
+                Utils.getHexSid(mySid), Utils.getHexSid(headSid.get()),
+                Utils.getHexSid(tailSid.get()), Utils.getHexSid(predecessorSid.get()),
+                Utils.getHexSid(successorSid.get()), amIHead(), amITail());
+    }
+
+    void runPrintMyCtxThread() {
+        Executors.newSingleThreadScheduledExecutor()
+                .scheduleAtFixedRate(this::printDebug, 0, 1, TimeUnit.SECONDS);
     }
 
     // todo: for following two methods, data should be refreshed by updateContext()
@@ -227,28 +288,5 @@ public class ZookeeperClient implements Watcher {
             return -1;
         }
         return replicas.get(index - 1);
-    }
-
-    @Override
-    public void process(WatchedEvent event) {
-//        System.out.println("Notification: " + Thread.currentThread().getName());
-        LOG.debug("New notification - type: {} state: {}", event.getType(),
-                event.getState().toString());
-        if (event.getState() == Event.KeeperState.Expired
-                || event.getState() == Event.KeeperState.Closed) {
-            LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
-            // exit on session expiration
-            System.exit(2);
-        }
-        if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
-            // session established, open connect latch
-            connLatch.countDown();
-            updateContext();
-        }
-        if (event.getType() == Event.EventType.NodeChildrenChanged) {
-            LOG.info("Event: NodeChildrenChanged");
-            // must update context
-            updateContext();
-        }
     }
 }

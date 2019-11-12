@@ -9,7 +9,6 @@ import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

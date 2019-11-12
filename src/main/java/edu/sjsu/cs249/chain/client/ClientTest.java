@@ -7,8 +7,6 @@ import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
 
 import java.io.IOException;
 

@@ -20,6 +20,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class TailChainClient {
 
@@ -35,6 +37,8 @@ public class TailChainClient {
     private ConcurrentMap<Integer, Boolean> xidResponseQue = new ConcurrentHashMap<>();
     private TailChainReplicaBlockingStub headStub;
     private TailChainReplicaBlockingStub tailStub;
+    private long headSid;
+    private long tailSid;
 
     public TailChainClient(String zkAddress, String root, String host, int port) {
         this.port = port;
@@ -47,6 +51,8 @@ public class TailChainClient {
     public void init() throws IOException, InterruptedException, KeeperException {
         startTcServer();
         connectToZk();
+        Executors.newSingleThreadScheduledExecutor()
+                .scheduleAtFixedRate(this::updateStubs, 0, 10, TimeUnit.MILLISECONDS);
     }
 
     public void connectToZk() throws IOException, InterruptedException, KeeperException {
@@ -57,29 +63,8 @@ public class TailChainClient {
         tcServer.start();
     }
 
-    // destroy stub and shutdown associated channel
-    private void destroyStubAndChannel(TailChainReplicaBlockingStub stub) {
-        if (stub != null) {
-            ManagedChannel ch = (ManagedChannel) stub.getChannel();
-            ch.shutdownNow();
-            stub = null;
-        }
-    }
-
-    private TailChainReplicaBlockingStub getTailStub()
-            throws KeeperException, InterruptedException {
-        String znode = getAbsPath(zk.getTailReplica());
-        return getStub(znode);
-    }
-
-    private TailChainReplicaBlockingStub getHeadStub()
-            throws KeeperException, InterruptedException {
-        String znode = getAbsPath(zk.getHeadReplica());
-        return getStub(znode);
-    }
-
     private String sidToZNodeAbsPath(long sessionId) {
-        return root + "/" + Utils.getHexSid(sessionId);
+        return getAbsPath(Utils.getHexSid(sessionId));
     }
 
     private String getAbsPath(String hexSid) {
@@ -99,29 +84,51 @@ public class TailChainClient {
         return TailChainReplicaGrpc.newBlockingStub(ch);
     }
 
-    // ***** CLIENT APIs *****
+    // destroy stub and shutdown associated channel
+    private void destroyStubAndChannel(TailChainReplicaBlockingStub stub) {
+        if (stub != null) {
+            ManagedChannel ch = (ManagedChannel) stub.getChannel();
+            ch.shutdown();
+            stub = null;
+        }
+    }
+
+    private void setChainHead(long sid) throws KeeperException, InterruptedException {
+        if (headSid == sid) {
+            return;
+        }
+        destroyStubAndChannel(headStub);
+        headStub = getStub(sidToZNodeAbsPath(sid));
+        headSid = sid;
+        System.out.println("NewHead: " + Utils.getHexSid(sid));
+    }
+
+    private void setChainTail(long sid) throws KeeperException, InterruptedException {
+        if (tailSid == sid) {
+            return;
+        }
+        destroyStubAndChannel(tailStub);
+        tailStub = getStub(sidToZNodeAbsPath(sid));
+        tailSid = sid;
+        System.out.println("NewTail: " + Utils.getHexSid(sid));
+    }
 
     void updateStubs() {
         try {
-            destroyStubAndChannel(headStub);
-            destroyStubAndChannel(tailStub);
-            headStub = getHeadStub();
-            tailStub = getTailStub();
+            setChainHead(zk.getHeadSid());
+            setChainTail(zk.getTailSid());
         } catch (Exception e) {
-            System.out.println(e.getMessage());
-            // set stub null if chain is empty
-            headStub = null;
-            tailStub = null;
+            LOG.debug("Failed to create stub. Exp: ", e);
+            System.err.println("ERROR: Chain is empty or some znodes might have corrupt data.");
+            System.exit(1);
         }
     }
 
     private boolean isChainEmpty() {
-        updateStubs();
-        if (headStub == null || tailStub == null) {
-            return true;
-        }
-        return false;
+        return headStub == null || tailStub == null;
     }
+
+    // ***** CLIENT APIs *****
 
     /**
      * Get the value to which the specified key is mapped.
@@ -138,10 +145,8 @@ public class TailChainClient {
     //          -- no nodes in replication chain -- action: return ECHNMTY
     public Response get(String key) {
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
+        int attempt = 0;
         do {
-            if (isChainEmpty()) {
-                return new Response(Response.Code.ECHNMTY, key);
-            }
             try {
                 GetResponse rsp = tailStub.get(request);
                 int rc = rsp.getRc();
@@ -151,9 +156,10 @@ public class TailChainClient {
                 if (rc == 2) {
                     return new Response(Response.Code.ENOKEY, key);
                 }
-                // rc == 1
-                System.out.println("The tail has been changed. Retrying...");
-                updateStubs(); // todo: remove
+                if (rc == 1) {
+                    System.out.println("The tail has been changed. Retrying...");
+                    continue;
+                }
             } catch (StatusRuntimeException e) {
                 // case 5: (after request was sent) all nodes in chain went down
                 if (e.getStatus().getCode() == Status.Code.UNAVAILABLE && isChainEmpty()) {
@@ -161,10 +167,11 @@ public class TailChainClient {
                 }
                 // something went wrong -- when?
                 if (e.getStatus().getCode() != Status.Code.UNAVAILABLE) {
-                    return new Response(Response.Code.EFAULT, key);
+                    break;
                 }
             }
-        } while (true);
+        } while (attempt++ < RETRIES);
+        return new Response(Response.Code.EFAULT, key);
     }
 
     /**
@@ -206,14 +213,15 @@ public class TailChainClient {
                     .setIncrValue(value).setHost(host).setPort(port).setCxid(cXid).build();
         }
 
+        int attempt = 0;
         do {
             if (tcServer.isTerminated()) {
                 LOG.error("TailChainClient server is down. Aborting request.");
                 return new Response(Response.Code.EABORT, key);
             }
-            if (isChainEmpty()) {
-                return new Response(Response.Code.ECHNMTY, key);
-            }
+//            if (isChainEmpty()) {
+//                return new Response(Response.Code.ECHNMTY, key);
+//            }
             try {
                 HeadResponse rsp;
                 if (op == OpCode.DEL) {
@@ -250,13 +258,16 @@ public class TailChainClient {
                 // something went wrong -- when?
                 if (e.getStatus().getCode() == Status.Code.UNKNOWN) {
                     LOG.error("Please check whether all server znodes has correct data.");
-                    return new Response(Response.Code.EFAULT, key);
+                    break;
                 }
                 // something went wrong -- when?
                 if (e.getStatus().getCode() != Status.Code.UNAVAILABLE) {
-                    return new Response(Response.Code.EFAULT, key);
+                    break;
                 }
+                // if response is unavailable but chain is not empty,
+                // try sending request to updated head node
             }
-        } while (true);
+        } while (attempt++ < RETRIES);
+        return new Response(Response.Code.EFAULT, key);
     }
 }
