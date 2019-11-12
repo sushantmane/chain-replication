@@ -65,28 +65,6 @@ public class ZookeeperClient implements Watcher {
         }
     }
 
-    @Override
-    public void process(WatchedEvent event) {
-        LOG.debug("New notification - type: {} state: {}", event.getType(),
-                event.getState().toString());
-        if (event.getState() == Event.KeeperState.Expired
-                || event.getState() == Event.KeeperState.Closed) {
-            LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
-            // exit on session expiration
-            System.exit(2);
-        }
-        if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
-            // session established, open connect latch
-            connLatch.countDown();
-        }
-
-        try {
-            updateContext();
-        } catch (KeeperException | InterruptedException e) {
-            // failed to update context; retry
-        }
-    }
-
     // update roles of nodes in chain
     public void updateContext() throws KeeperException, InterruptedException {
         // todo: replace with chain root
@@ -225,5 +203,43 @@ public class ZookeeperClient implements Watcher {
             return -1;
         }
         return replicas.get(index - 1);
+    }
+
+    @Override
+    public void process(WatchedEvent event) {
+        System.out.println("Notification: " + Thread.currentThread().getName());
+        LOG.debug("New notification - type: {} state: {}", event.getType(),
+                event.getState().toString());
+        if (event.getState() == Event.KeeperState.Expired
+                || event.getState() == Event.KeeperState.Closed) {
+            LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
+            // exit on session expiration
+            System.exit(2);
+        }
+        if (mySid == 0 && event.getState() == Event.KeeperState.SyncConnected) {
+            // session established, open connect latch
+            connLatch.countDown();
+        }
+
+        if (event.getType() == Event.EventType.NodeCreated) {
+            System.out.println("NodeCreated");
+        }
+
+        // A watch is set with a call to exists.
+        if (event.getType() == Event.EventType.NodeDeleted) {
+            System.out.println("NodeDeleted");
+        }
+        if (event.getType() == Event.EventType.NodeChildrenChanged) {
+            System.out.println("NodeChildrenChanged");
+        }
+        if (event.getState() == Event.KeeperState.Disconnected) {
+            System.out.println("Disconnected");
+        }
+
+        try {
+            updateContext();
+        } catch (KeeperException | InterruptedException e) {
+            // failed to update context; retry
+        }
     }
 }

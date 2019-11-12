@@ -1,9 +1,8 @@
 package edu.sjsu.cs249.chain.client;
 
-import com.google.common.eventbus.EventBus;
-import com.google.common.eventbus.Subscribe;
 import edu.sjsu.cs249.chain.GetRequest;
 import edu.sjsu.cs249.chain.GetResponse;
+import edu.sjsu.cs249.chain.HeadResponse;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc;
 import edu.sjsu.cs249.chain.TailChainReplicaGrpc.TailChainReplicaBlockingStub;
 import edu.sjsu.cs249.chain.TailDeleteRequest;
@@ -12,49 +11,37 @@ import edu.sjsu.cs249.chain.util.Utils;
 import edu.sjsu.cs249.chain.zookeeper.ZookeeperClient;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TailChainClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailChainClient.class);
 
-    private ManagedChannel channel;
+    private int cXid = 1; // client transaction id
+    private int RETRIES = 10;
+    private int port;    // port on which client will listen for messages from tail
+    private String host; // ip address of this client
+    private String root; // zookeeper chain replica root znode
     private ZookeeperClient zk;
+    private TailClientServer tcServer; // to handle messages from tail
+    private ConcurrentMap<Integer, Boolean> xidResponseQue = new ConcurrentHashMap<>();
     private TailChainReplicaBlockingStub headStub;
     private TailChainReplicaBlockingStub tailStub;
 
-    private String host; // ip address of this client
-    private int port;    // port on which client will listen for messages from tail
-    private long sid;    // zookeeper session id
-    private String root; // zookeeper chain replica root znode
-    private int cXid = 1; // client transaction id
-    private int RETRIES = 10;
-    private TailClientServer tcServer; // to handle messages from tail
-    private EventBus xidEventBus;
-
-    private ConcurrentMap<Integer, Boolean> xidResQue = new ConcurrentHashMap<>();
-
     public TailChainClient(String zkAddress, String root, String host, int port) {
-        this();
         this.port = port;
         this.root = root;
         this.host = host;
         this.zk = new ZookeeperClient(zkAddress, root);
-        this.tcServer = new TailClientServer(xidEventBus, port, xidResQue);
-        this.xidEventBus.register(this);
-    }
-
-    private TailChainClient() {
-        xidEventBus = new EventBus();
+        this.tcServer = new TailClientServer(xidResponseQue, port);
     }
 
     public void init() throws IOException, InterruptedException {
@@ -62,13 +49,33 @@ public class TailChainClient {
         connectToZk();
     }
 
-    private void connectToZk() throws IOException, InterruptedException {
+    public void connectToZk() throws IOException, InterruptedException {
         zk.connect();
-        sid = zk.getSessionId();
     }
 
-    private void startTcServer() throws IOException {
+    public void startTcServer() throws IOException {
         tcServer.start();
+    }
+
+    // destroy stub and shutdown associated channel
+    private void destroyStubAndChannel(TailChainReplicaBlockingStub stub) {
+        if (stub != null) {
+            ManagedChannel ch = (ManagedChannel) stub.getChannel();
+            ch.shutdownNow();
+            stub = null;
+        }
+    }
+
+    private TailChainReplicaBlockingStub getTailStub()
+            throws KeeperException, InterruptedException {
+        String znode = getAbsPath(zk.getTailReplica());
+        return getStub(znode);
+    }
+
+    private TailChainReplicaBlockingStub getHeadStub()
+            throws KeeperException, InterruptedException {
+        String znode = getAbsPath(zk.getHeadReplica());
+        return getStub(znode);
     }
 
     private String sidToZNodeAbsPath(long sessionId) {
@@ -83,51 +90,81 @@ public class TailChainClient {
         return cXid++;
     }
 
-    private AtomicBoolean xidRecvd = new AtomicBoolean(false);
-
-    @Subscribe
-    public void receiveXidEvents(XidProcessed xidProcessed) {
-        xidRecvd.set(true);
-    }
-
-    private TailChainReplicaBlockingStub getStub(String znode) throws KeeperException, InterruptedException {
-        //get stub from cache
-        byte data[] = zk.getData(getAbsPath(znode), false);
+    // returns stub for given node
+    private TailChainReplicaBlockingStub getStub(String znode)
+            throws KeeperException, InterruptedException {
+        byte[] data = zk.getData(znode, false);
         String target = new String(data).split("\n")[0];
-        InetSocketAddress addr = Utils.str2addr(target);
         ManagedChannel ch = ManagedChannelBuilder.forTarget(target).usePlaintext().build();
         return TailChainReplicaGrpc.newBlockingStub(ch);
     }
 
     // ***** CLIENT APIs *****
 
+    void updateStubs() {
+        try {
+            destroyStubAndChannel(headStub);
+            destroyStubAndChannel(tailStub);
+            headStub = getHeadStub();
+            tailStub = getTailStub();
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+            // set stub null if chain is empty
+            headStub = null;
+            tailStub = null;
+        }
+    }
+
+    private boolean isChainEmpty() {
+        updateStubs();
+        if (headStub == null || tailStub == null) {
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Get the value to which the specified key is mapped.
      * @param key key for which the value is to be retrieved
      */
-    public Response get(String key) throws KeeperException, InterruptedException {
-        //todo: update following code
-        zk.updateContext();
-        tailStub = getStub(zk.getTailReplica());
+    // case 1: rc = 0 - Success -- action: return SUCCESS
+    // case 2: rc = 1 - I'm not tail -- action: retry
+    // case 3: rc = 2 - Key does not exist -- action: return ENOKEY
+    // case 4: (after request was sent) tail to which request was sent
+    //         is down but chain is not empty -- action: return ECHNMTY
+    // case 5: (after request was sent) all nodes in chain went down
+    //          -- action: return ECHNMTY
+    // case 6: (before sending request) chain is empty
+    //          -- no nodes in replication chain -- action: return ECHNMTY
+    public Response get(String key) {
         GetRequest request = GetRequest.newBuilder().setKey(key).build();
-        GetResponse rsp;
-        int rc = 1;
         do {
-            rsp = tailStub.get(request);
-            rc = rsp.getRc();
-            if (rc == 1) {
-                System.out.println("The tail has been changed. Retrying...");
-                // todo: check need to invoke updateContext() before proceeding
+            if (isChainEmpty()) {
+                return new Response(Response.Code.ECHNMTY, key);
             }
-        } while (rc == 1);
-
-        if (rc == 0) {
-            return new Response(Response.Code.SUCCESS, key, rsp.getValue());
-        }
-        if (rc == 2) {
-            return new Response(Response.Code.ENOKEY, key);
-        }
-        return new Response(Response.Code.EFAULT, key);
+            try {
+                GetResponse rsp = tailStub.get(request);
+                int rc = rsp.getRc();
+                if (rc == 0) {
+                    return new Response(Response.Code.SUCCESS, key, rsp.getValue());
+                }
+                if (rc == 2) {
+                    return new Response(Response.Code.ENOKEY, key);
+                }
+                // rc == 1
+                System.out.println("The tail has been changed. Retrying...");
+                updateStubs(); // todo: remove
+            } catch (StatusRuntimeException e) {
+                // case 5: (after request was sent) all nodes in chain went down
+                if (e.getStatus().getCode() == Status.Code.UNAVAILABLE && isChainEmpty()) {
+                    return new Response(Response.Code.ECHNMTY, key);
+                }
+                // something went wrong -- when?
+                if (e.getStatus().getCode() != Status.Code.UNAVAILABLE) {
+                    return new Response(Response.Code.EFAULT, key);
+                }
+            }
+        } while (true);
     }
 
     /**
@@ -138,91 +175,88 @@ public class TailChainClient {
      *              Negative value will decrement the value by value.
      */
     public Response increment(String key, int value) {
-        if (tcServer.isTerminated()) {
-            LOG.error("TailChainClient server is down. Aborting request.");
-            return new Response(Response.Code.EABORT, key);
-        }
-        int xid = 98473625;
-        xidResQue.put(xid, false);
-//        while (!xidRecvd.compareAndSet(true, false)) {
-        while (!xidResQue.get(xid)) {
-            try {
-                Thread.sleep(20);
-            } catch (InterruptedException e) {
-                // ignore
-            }
-        }
-        xidResQue.remove(xid);
-
-        if (true) {
-            return new Response(Response.Code.SUCCESS, key);
-        }
-
-        //todo: under dev
-        TailIncrementRequest req = TailIncrementRequest.newBuilder()
-                .setKey(key)
-                .setIncrValue(value)
-                .setHost(host)
-                .setPort(port)
-                .setCxid(getCXid())
-                .build();
-        //todo: remove
-        if (headStub == null) {
-            return new Response(Response.Code.EFAULT, key);
-        }
-
-        int rc;
-        do {
-            rc = headStub.increment(req).getRc();
-            // todo: handle grpc exception
-            if (rc != 0) {
-                System.out.println("The head has been changed. Retrying...");
-                // todo: check need to invoke updateContext() before proceeding
-            }
-        } while (rc != 0);
-
-        // todo: wait for response from the tail
-        return new Response(Response.Code.SUCCESS, key);
+        return execIdOp(OpCode.INC, key, value);
     }
 
     /**
      * Removes the entry for the specified key.
      * @param key
      */
-    public Response delete(String key) throws KeeperException, InterruptedException {
-        if (tcServer.isTerminated()) {
-            LOG.error("TailChainClient server is down. Aborting request.");
-            return new Response(Response.Code.EABORT, key);
+    public Response delete(String key) {
+        return execIdOp(OpCode.DEL, key);
+    }
+
+    enum OpCode { DEL, INC }
+
+    // increment delete operation executor
+    private Response execIdOp(OpCode op, String key) {
+        return execIdOp(op, key, 0);
+    }
+
+    private Response execIdOp(OpCode op, String key, int value) {
+        TailDeleteRequest delReq = null;
+        TailIncrementRequest incReq = null;
+        int cXid = getCXid();
+
+        if (op == OpCode.DEL) {
+            delReq = TailDeleteRequest.newBuilder().setKey(key)
+                    .setHost(host).setPort(port).setCxid(cXid).build();
+        } else {
+            incReq = TailIncrementRequest.newBuilder().setKey(key)
+                    .setIncrValue(value).setHost(host).setPort(port).setCxid(cXid).build();
         }
 
-        //todo: update following code
-        zk.updateContext();
-        System.out.println("head: " + zk.getHeadReplica());
-        headStub = getStub(zk.getHeadReplica());
-
-        TailDeleteRequest req = TailDeleteRequest.newBuilder()
-                .setKey(key)
-                .setHost(host)
-                .setPort(port)
-                .setCxid(getCXid())
-                .build();
-        int rc = -1;
-        int retry = 0;
         do {
+            if (tcServer.isTerminated()) {
+                LOG.error("TailChainClient server is down. Aborting request.");
+                return new Response(Response.Code.EABORT, key);
+            }
+            if (isChainEmpty()) {
+                return new Response(Response.Code.ECHNMTY, key);
+            }
             try {
-                rc = headStub.delete(req).getRc();
+                HeadResponse rsp;
+                if (op == OpCode.DEL) {
+                    rsp = headStub.delete(delReq);
+                } else {
+                    rsp = headStub.increment(incReq);
+                }
+                if (rsp.getRc() == 1) {
+                    System.out.println("The tail has been changed. Retrying...");
+                    // wrong head
+                    updateStubs();
+                    continue;
+                }
+                // refactor: what if tail sends response before we add cXid?
+                xidResponseQue.put(cXid, false);
+                // state: wait for response from tail
+                while (!xidResponseQue.get(cXid)) {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException ignored) {
+                    }
+                    // should we check whether chain is empty?
+                    // because if all node goes down, client will hung
+                    // as it will keep waiting for response from the tail
+                }
+                // state: got response from tail
+                xidResponseQue.remove(cXid);
+                return new Response(Response.Code.SUCCESS, key);
             } catch (StatusRuntimeException e) {
-                // todo: decide action, probably retry with latest head information
-                System.err.println("GRPC StatusCode: " + e.getStatus().getCode());
-                continue;
+                // case 5: (after request was sent) all nodes in chain went down
+                if (e.getStatus().getCode() == Status.Code.UNAVAILABLE && isChainEmpty()) {
+                    return new Response(Response.Code.ECHNMTY, key);
+                }
+                // something went wrong -- when?
+                if (e.getStatus().getCode() == Status.Code.UNKNOWN) {
+                    LOG.error("Please check whether all server znodes has correct data.");
+                    return new Response(Response.Code.EFAULT, key);
+                }
+                // something went wrong -- when?
+                if (e.getStatus().getCode() != Status.Code.UNAVAILABLE) {
+                    return new Response(Response.Code.EFAULT, key);
+                }
             }
-            if (rc != 0) {
-                System.out.println("The head has been changed. Retrying...");
-                // todo: check need to invoke updateContext() before proceeding
-            }
-        } while (rc != 0 && retry++ < RETRIES);
-        // todo: wait for response from the tail
-
-        return new Response(Response.Code.SUCCESS, key);
+        } while (true);
     }
 }

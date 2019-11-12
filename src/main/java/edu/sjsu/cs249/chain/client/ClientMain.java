@@ -133,10 +133,10 @@ public class ClientMain {
                 System.out.println(rsp.getKey() + ": "+ rsp.getValue());
                 break;
             case "del":
-                System.out.println("Key does not exist.");
+                System.out.println("Success: " + rsp.getKey() + " removed successfully");
                 break;
             case "inc":
-                System.out.println("Value has been updated.");
+                System.out.println("Value has been updated");
                 break;
             default:
                 // do nothing

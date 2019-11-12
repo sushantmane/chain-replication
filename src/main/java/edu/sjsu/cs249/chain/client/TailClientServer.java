@@ -1,6 +1,5 @@
 package edu.sjsu.cs249.chain.client;
 
-import com.google.common.eventbus.EventBus;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import org.slf4j.Logger;
@@ -16,13 +15,11 @@ public class TailClientServer {
 
     private Server server;
 
-    public TailClientServer(EventBus eventBus, int port, ConcurrentMap<Integer, Boolean> map) {
+    public TailClientServer(ConcurrentMap<Integer, Boolean> xidResponseQue, int port) {
         server = ServerBuilder.forPort(port)
-                .addService(new TailClientService(eventBus, map))
+                .addService(new TailClientService(xidResponseQue))
                 .build();
     }
-
-    private TailClientServer() {}
 
     public void start() throws IOException {
         server.start();

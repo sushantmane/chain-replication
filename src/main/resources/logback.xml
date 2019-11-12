@@ -18,7 +18,7 @@
         </encoder>
         <append>true</append>
     </appender>
-    <logger name="edu.sjsu.cs249" level="INFO" additivity="false">
+    <logger name="edu.sjsu.cs249" level="DEBUG" additivity="false">
         <appender-ref ref="FILE" />
     </logger>
     <logger name="org.apache.zookeeper" level="INFO" additivity="false">
