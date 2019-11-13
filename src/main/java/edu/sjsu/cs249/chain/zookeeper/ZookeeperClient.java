@@ -55,7 +55,6 @@ public class ZookeeperClient implements Watcher {
             LOG.error("Invalid zRoot: {}", root);
             throw new KeeperException.NoNodeException();
         }
-        runPrintMyCtxThread();
     }
 
     private boolean isValidRoot() throws KeeperException, InterruptedException {
@@ -256,17 +255,5 @@ public class ZookeeperClient implements Watcher {
             updateContext();
             // todo: call set watch if updateContext() fails in getChildren
         }
-    }
-
-    // *** USED FOR TESTING ONLY ***
-    private void printDebug() {
-        LOG.debug("My:{} Head:{} Tail:{} Pred:{} Succ:{} amIHead:{} amITail:{}",
-                Utils.getHexSid(mySid), Utils.getHexSid(headSid.get()),
-                Utils.getHexSid(tailSid.get()), Utils.getHexSid(predecessorSid.get()),
-                Utils.getHexSid(successorSid.get()), amIHead(), amITail());
-    }
-
-    private void runPrintMyCtxThread() {
-        //Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(this::printDebug, 0, 1, TimeUnit.SECONDS);
     }
 }

@@ -106,30 +106,30 @@ public class TailChainClient {
         if (headSid == sid) {
             return;
         }
-        if (headSid == -1) {
+        if (sid == -1) {
+            headSid = -1;
             headStub = null; // no nodes in chain
             return;
         }
-        // use reentrant lock?
         destroyStubAndChannel(headStub);
         headStub = getStub(sidToZNodeAbsPath(sid));
         headSid = sid;
-        System.out.println("NewHead: " + Utils.getHexSid(sid));
+        LOG.info("NewHead:{}", Utils.getHexSid(sid));
     }
 
     private void setChainTail(long sid) throws KeeperException, InterruptedException {
         if (tailSid == sid) {
             return;
         }
-        if (tailSid == -1) {
+        if (sid == -1) {
+            tailSid = -1;
             tailStub = null; // no nodes in chain
             return;
         }
-        // use reentrant lock?
         destroyStubAndChannel(tailStub);
         tailStub = getStub(sidToZNodeAbsPath(sid));
         tailSid = sid;
-        System.out.println("NewTail: " + Utils.getHexSid(sid));
+        LOG.info("NewTail:{}", Utils.getHexSid(sid));
     }
 
     void updateStubs() {
@@ -139,7 +139,7 @@ public class TailChainClient {
             setChainTail(zk.getTailSid());
         } catch (Exception e) {
             // todo: can we handle this in a better way?
-            LOG.debug("Failed to create stub. Exp: {}", e.getMessage());
+            LOG.error("Failed to create stub. Exp: {}", e.getMessage());
             if (tailSid == -1 || headSid == -1) {
                 LOG.info("Chain is empty."); // which is kind of okay cause operations will fail
             } else {
