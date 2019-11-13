@@ -9,6 +9,9 @@ import io.grpc.ManagedChannelBuilder;
 import org.apache.zookeeper.KeeperException;
 
 import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class ClientTest {
 
@@ -39,7 +42,21 @@ public class ClientTest {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException, KeeperException {
-        testTailClientService();
+//        testTailClientService();
 //        testZk();
+
+        ConcurrentMap<String, Integer> map = new ConcurrentHashMap<>();
+        for (int i = 0; i < 20; i++) {
+            map.put("key" + i, i);
+        }
+
+        for (String key: map.keySet()) {
+            if (key.equals("key1")) {
+                System.out.println(key);
+                map.remove(key);
+            }
+        }
+
+        System.out.println(map);
     }
 }

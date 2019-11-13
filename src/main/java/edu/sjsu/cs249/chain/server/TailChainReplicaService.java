@@ -335,6 +335,24 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         }
     }
 
+    private void pruneCompletedRequests() {
+        try {
+            LatestXidRequest req = LatestXidRequest.newBuilder().build();
+            LatestXidResponse rsp = tailStub.getLatestXid(req);
+            if (rsp.getRc() == 1) {
+                LOG.info("GetLatestXid was ignored - Not a valid tail");
+                return;
+            }
+            for (TailStateUpdateRequest request : statePropagateReqQue.keySet()) {
+                if (request.getXid() <= rsp.getXid()) {
+                    statePropagateReqQue.remove(request);
+                }
+            }
+        } catch (StatusRuntimeException e) {
+            LOG.error("GetLatestXid request failed. ", e);
+        }
+    }
+
     private long getXid() {
         return latestXid.getAndAdd(1);
     }
