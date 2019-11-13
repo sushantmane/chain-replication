@@ -53,6 +53,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
     public TailChainReplicaService(ZookeeperClient zk) {
         this.zk = zk;
         startUpdateCtxThread();
+        startReqQuePruningThread();
     }
 
     @Override
@@ -313,6 +314,11 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
                 }, 5, 5, TimeUnit.MILLISECONDS);
     }
 
+    void startReqQuePruningThread() {
+        Executors.newSingleThreadScheduledExecutor()
+                .scheduleAtFixedRate(this::startReqQuePruningThread, 1, 2, TimeUnit.MINUTES);
+    }
+
     // update my env
     void updateCtx() {
         updateCtxInProgress.set(true);
@@ -336,6 +342,9 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
     }
 
     private void pruneCompletedRequests() {
+        if (statePropagateReqQue.size() == 0) {
+            return;
+        }
         try {
             LatestXidRequest req = LatestXidRequest.newBuilder().build();
             LatestXidResponse rsp = tailStub.getLatestXid(req);
