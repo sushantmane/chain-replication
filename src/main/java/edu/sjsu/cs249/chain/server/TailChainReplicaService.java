@@ -125,8 +125,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
     @Override
     public void stateTransfer(TailStateTransferRequest req, StreamObserver<ChainResponse> rspObs) {
         // take write lock
-
-        LOG.debug("StateTransfer request received");
+        LOG.debug("StateTransfer request received from node:{}", req.getSrc());
         ChainResponse.Builder rspBldr = ChainResponse.newBuilder();
         if (req.getSrc() != predecessorID) {
             rspBldr.setRc(1);
@@ -135,16 +134,38 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
             rspObs.onCompleted();
             return;
         }
-
-        // copy kvStore
+        // update kvStore
         for (String key : req.getStateMap().keySet()) {
             kvStore.put(key, req.getStateMap().get(key));
         }
         // update xid
         latestXid.set(req.getStateXid());
 
-
-
+        // apply missed update
+        for (TailStateUpdateRequest stateRequest : req.getSentList()) {
+            if (stateRequest.getXid() < latestXid.get()) {
+                continue; // update already applied
+            }
+            latestXid.set(stateRequest.getXid());
+            if (zk.amITail()) {
+                notifyClient(stateRequest.getHost(), stateRequest.getPort(),
+                        stateRequest.getXid(), stateRequest.getCxid());
+                continue;
+            }
+            TailStateUpdateRequest updateRequest = TailStateUpdateRequest.newBuilder(stateRequest)
+                    .setSrc(zk.getSessionId()).build();
+            try {
+                int rc = successorStub.proposeStateUpdate(updateRequest).getRc();
+                if (rc == 1) {
+                    LOG.info("StateUpdate request was ignored - Not a valid predecessor");
+                }
+                statePropagateReqQue.put(updateRequest, true);
+            } catch (StatusRuntimeException e) {
+                LOG.error("Failed to propagate state - xid:{} cXid:{} e:{}",
+                        updateRequest.getXid(), updateRequest.getCxid(), e);
+            }
+        }
+        LOG.info("StateTransfer has been completed. PredecessorNode:{}", Utils.getHexSid(predecessorID));
         rspBldr.setRc(0);
         LOG.debug("StateTransfer response - rc:{}", rspBldr.getRc());
         rspObs.onNext(rspBldr.build());
@@ -346,7 +367,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         tailSid = sId;
     }
 
-    public void notifyClient(String host, int port, int xid, int cXid) {
+    public void notifyClient(String host, int port, long xid, int cXid) {
         // todo: add caching for client stubs
         TailClientBlockingStub tcbStub = getClientStub(host, port);
         CxidProcessedRequest request = CxidProcessedRequest.newBuilder().setCxid(cXid).build();
