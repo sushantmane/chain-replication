@@ -21,7 +21,9 @@ public class TailClientService extends TailClientGrpc.TailClientImplBase {
     @Override
     public void cxidProcessed(CxidProcessedRequest req, StreamObserver<ChainResponse> rspObs) {
         LOG.info("Ack for xid {} received", req.getCxid());
-        xidResponseQue.replace(req.getCxid(), false, true);
+        // boolean res = xidResponseQue.replace(req.getCxid(), false, true);
+        xidResponseQue.put(req.getCxid(), true);
+        System.out.println("ACK: " + " cxid:" + req.getCxid());
         ChainResponse rsp = ChainResponse.newBuilder().setRc(0).build();
         rspObs.onNext(rsp);
         rspObs.onCompleted();

@@ -15,8 +15,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ZookeeperClient implements Watcher {
@@ -209,6 +207,8 @@ public class ZookeeperClient implements Watcher {
             // head = tail = -1 = chain empty :: used by TailChainClient
             headSid.set(-1);
             tailSid.set(-1);
+            predecessorSid.set(-1);
+            successorSid.set(-1);
             return;
         }
         headSid.set(sids.get(0));
@@ -235,7 +235,7 @@ public class ZookeeperClient implements Watcher {
 
     @Override
     public void process(WatchedEvent event) {
-        System.out.println("Notification: " + Thread.currentThread().getName());
+        //System.out.println("Notification: " + Thread.currentThread().getName());
         LOG.debug("New notification - type: {} state: {}", event.getType(),
                 event.getState().toString());
         if (event.getState() == Event.KeeperState.Expired
@@ -266,27 +266,7 @@ public class ZookeeperClient implements Watcher {
                 Utils.getHexSid(successorSid.get()), amIHead(), amITail());
     }
 
-    void runPrintMyCtxThread() {
-        Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(this::printDebug, 0, 1, TimeUnit.SECONDS);
-    }
-
-    // todo: for following two methods, data should be refreshed by updateContext()
-    public long getSuccessor(String path, long sid) throws KeeperException, InterruptedException {
-        List<Long> replicas = getOrderListOfChainNodes(path, true);
-        int index = replicas.indexOf(sid);
-        if (index == -1 || index == replicas.size() - 1) {
-            return -1;
-        }
-        return replicas.get(index + 1);
-    }
-
-    public long getPredecessor(String path, long sid) throws KeeperException, InterruptedException {
-        List<Long> replicas = getOrderListOfChainNodes(path, true);
-        int index = replicas.indexOf(sid);
-        if (index <= 0) {
-            return -1;
-        }
-        return replicas.get(index - 1);
+    private void runPrintMyCtxThread() {
+        //Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(this::printDebug, 0, 1, TimeUnit.SECONDS);
     }
 }

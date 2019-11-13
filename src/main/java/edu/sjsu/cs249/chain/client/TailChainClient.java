@@ -22,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TailChainClient {
 
@@ -39,6 +40,7 @@ public class TailChainClient {
     private TailChainReplicaBlockingStub tailStub;
     private long headSid;
     private long tailSid;
+    private AtomicBoolean updateCtxInProgress = new AtomicBoolean(false);
 
     public TailChainClient(String zkAddress, String root, String host, int port) {
         this.port = port;
@@ -52,7 +54,11 @@ public class TailChainClient {
         startTcServer();
         connectToZk();
         Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(this::updateStubs, 0, 10, TimeUnit.MILLISECONDS);
+                .scheduleAtFixedRate(()-> {
+                    if (!updateCtxInProgress.get()) {
+                        updateStubs();;
+                    }
+                }, 0, 10, TimeUnit.MILLISECONDS);
     }
 
     public void connectToZk() throws IOException, InterruptedException, KeeperException {
@@ -100,6 +106,11 @@ public class TailChainClient {
         if (headSid == sid) {
             return;
         }
+        if (headSid == -1) {
+            headStub = null; // no nodes in chain
+            return;
+        }
+        // use reentrant lock?
         destroyStubAndChannel(headStub);
         headStub = getStub(sidToZNodeAbsPath(sid));
         headSid = sid;
@@ -110,6 +121,11 @@ public class TailChainClient {
         if (tailSid == sid) {
             return;
         }
+        if (tailSid == -1) {
+            tailStub = null; // no nodes in chain
+            return;
+        }
+        // use reentrant lock?
         destroyStubAndChannel(tailStub);
         tailStub = getStub(sidToZNodeAbsPath(sid));
         tailSid = sid;
@@ -117,16 +133,22 @@ public class TailChainClient {
     }
 
     void updateStubs() {
+        updateCtxInProgress.set(true);
         try {
             setChainHead(zk.getHeadSid());
             setChainTail(zk.getTailSid());
         } catch (Exception e) {
             // todo: can we handle this in a better way?
             LOG.debug("Failed to create stub. Exp: {}", e.getMessage());
-//            System.err.println("ERROR: Chain is empty or some znodes might have corrupt data.");
-//            System.exit(1);
+            if (tailSid == -1 || headSid == -1) {
+                LOG.info("Chain is empty."); // which is kind of okay cause operations will fail
+            } else {
+                LOG.error("Some znodes might have corrupt data.");
+            }
             headStub = null;
             tailStub = null;
+        } finally {
+            updateCtxInProgress.set(false);
         }
     }
 
@@ -245,9 +267,9 @@ public class TailChainClient {
                     continue;
                 }
                 // refactor: what if tail sends response before we add cXid?
-                xidResponseQue.put(cXid, false);
+                // xidResponseQue.put(cXid, false);
                 // state: wait for response from tail
-                while (!xidResponseQue.get(cXid)) {
+                while (!xidResponseQue.containsKey(cXid)) {
                     try {
                         Thread.sleep(10);
                     } catch (InterruptedException ignored) {
