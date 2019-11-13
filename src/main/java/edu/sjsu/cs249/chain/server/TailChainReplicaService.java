@@ -316,7 +316,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
 
     void startReqQuePruningThread() {
         Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(this::startReqQuePruningThread, 1, 2, TimeUnit.MINUTES);
+                .scheduleAtFixedRate(this::pruneCompletedRequests, 1, 2, TimeUnit.MINUTES);
     }
 
     // update my env

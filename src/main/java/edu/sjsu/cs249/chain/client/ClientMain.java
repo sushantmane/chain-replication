@@ -178,6 +178,8 @@ public class ClientMain {
             app.run();
         } catch (KeeperException | InterruptedException | IOException e) {
             System.err.println("ERROR: " + e.getMessage());
+        } finally {
+            System.exit(0);
         }
     }
 }
