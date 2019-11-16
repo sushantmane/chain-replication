@@ -5,7 +5,12 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.UnknownHostException;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class Utils {
 
@@ -66,9 +71,5 @@ public class Utils {
         int colon = addr.lastIndexOf(':');
         return new InetSocketAddress(addr.substring(0, colon),
                 Integer.parseInt(addr.substring(colon + 1 )));
-    }
-
-    public static void main(String[] args) {
-        System.out.println(getLocalhost());
     }
 }

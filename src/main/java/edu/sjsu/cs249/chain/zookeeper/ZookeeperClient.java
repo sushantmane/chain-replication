@@ -50,7 +50,7 @@ public class ZookeeperClient implements Watcher {
         connLatch.await();
         mySid = zk.getSessionId();
         LOG.info("Connected to zookeeper server. SessionId: {}", mySid);
-        System.out.println("Connected to zookeeper server");
+        System.out.println("Connected to zookeeper server. MyId: " + Utils.getHexSid(mySid));
         if (!isValidRoot()) {
             LOG.error("Invalid zRoot: {}", root);
             throw new KeeperException.NoNodeException();

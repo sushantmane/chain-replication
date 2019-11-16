@@ -26,6 +26,10 @@ import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
@@ -142,8 +146,21 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         // update xid
         latestXid.set(req.getStateXid());
 
+
+        List<TailStateUpdateRequest> pendingUpdates = req.getSentList();
+        Collections.sort(pendingUpdates, new Comparator<TailStateUpdateRequest>() {
+            @Override
+            public int compare(TailStateUpdateRequest o1, TailStateUpdateRequest o2) {
+                return Long.compare(o1.getXid(), o2.getXid());
+            }
+        });
+
+        for (TailStateUpdateRequest r : pendingUpdates) {
+            System.out.println("Apply Req: " + r + " Xid: " + r.getXid());
+        }
+
         // apply missed update
-        for (TailStateUpdateRequest stateRequest : req.getSentList()) {
+        for (TailStateUpdateRequest stateRequest : pendingUpdates) {
             if (stateRequest.getXid() < latestXid.get()) {
                 continue; // update already applied
             }
@@ -213,6 +230,10 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
                     .build();
             statePropagateReqQue.put(stateUpdateRequest, false);
             try {
+                LOG.debug("Initiate ProposeStateUpdate request - k:{} v:{} xid:{} cXid:{} cli:({}:{})",
+                        stateUpdateRequest.getKey(), stateUpdateRequest.getValue(),
+                        stateUpdateRequest.getXid(), stateUpdateRequest.getCxid(),
+                        req.getHost(), req.getPort());
                 ChainResponse rsp = successorStub.proposeStateUpdate(stateUpdateRequest);
                 if (rsp.getRc() == 1) {
                     System.out.println("Sent to wrong successor..");
@@ -421,11 +442,27 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         destroyStubAndChannel(successorStub);
         successorStub = getStub(sidToZNodeAbsPath(sid));
         successorId = sid;
+
+
+
+        List<TailStateUpdateRequest> sentRequests = new ArrayList<>(statePropagateReqQue.keySet());
+        Collections.sort(sentRequests, new Comparator<TailStateUpdateRequest>() {
+            @Override
+            public int compare(TailStateUpdateRequest o1, TailStateUpdateRequest o2) {
+                return Long.compare(o1.getXid(), o2.getXid());
+            }
+        });
+
+        System.out.println("Initiate state update... sentList: " + sentRequests.size());
+        for (TailStateUpdateRequest r : sentRequests) {
+            System.out.println("Req: " + r + " Xid: " + r.getXid());
+        }
+
         // start state transfer request
         TailStateTransferRequest req = TailStateTransferRequest.newBuilder()
                 .setSrc(zk.getSessionId())
                 .setStateXid(latestXid.get())
-                .addAllSent(statePropagateReqQue.keySet())
+                .addAllSent(sentRequests)
                 .putAllState(kvStore)
                 .build();
         LOG.info("Initiate state transfer from {} to {}",
