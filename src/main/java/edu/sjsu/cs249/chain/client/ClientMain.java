@@ -16,12 +16,11 @@ public class ClientMain {
     private CommandLine cmd;
 
     private String getUsageStr() {
-        String str = "\n"
+        return "\n"
                 + "+--------------------------------------------------------+\n"
                 + "|           Replicated Hashtable Service Client          |\n"
                 + "| Usage: get key | inc key value | del key | quit | help |\n"
                 + "+--------------------------------------------------------+\n";
-        return str;
     }
 
     // interactive command prompt
@@ -73,6 +72,7 @@ public class ClientMain {
                     System.out.println("Usage: get key | inc key value | del key | quit | help");
                     break;
                 case "quit":
+                    scanner.close();
                     System.exit(0);
                 default:
                     System.out.println("Operation not supported");
@@ -91,10 +91,6 @@ public class ClientMain {
         String host = getHost();
         // *** start services ***
         clientLib = new TailChainClient(zkAddr, root, host, port); // client library object
-//        clientLib.startTcServer();       // start TailClientService server
-//        System.out.println("Connecting to zookeeper service...");
-//        clientLib.connectToZk();
-//        System.out.println("Zookeeper connection established");
         clientLib.init();
     }
 

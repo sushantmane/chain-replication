@@ -29,36 +29,38 @@ public class TailChainClient {
     private static final Logger LOG = LoggerFactory.getLogger(TailChainClient.class);
 
     private int cXid = 1; // client transaction id
-    private int RETRIES = 10;
-    private int port;    // port on which client will listen for messages from tail
-    private String host; // ip address of this client
-    private String root; // zookeeper chain replica root znode
-    private ZookeeperClient zk;
-    private TailClientServer tcServer; // to handle messages from tail
-    private ConcurrentMap<Integer, Boolean> xidResponseQue = new ConcurrentHashMap<>();
+    private final int RETRIES = 10;
+    private final int port;    // port on which client will listen for messages from tail
+    private final String host; // ip address of this client
+    private final String root; // zookeeper chain replica root znode
+    private final ZookeeperClient zk;
+    private final TailClientServer tcServer; // to handle messages from tail
+    private final ConcurrentMap<Integer, Boolean> xidResponseQue = new ConcurrentHashMap<>();
+    private final AtomicBoolean updateCtxInProgress = new AtomicBoolean(false);
+
     private TailChainReplicaBlockingStub headStub;
     private TailChainReplicaBlockingStub tailStub;
     private long headSid;
     private long tailSid;
-    private AtomicBoolean updateCtxInProgress = new AtomicBoolean(false);
 
-    public TailChainClient(String zkAddress, String root, String host, int port) {
+    public TailChainClient(String zkAddress, String root, String host, int port)
+            throws InterruptedException, IOException, KeeperException {
         this.port = port;
         this.root = root;
         this.host = host;
         this.zk = new ZookeeperClient(zkAddress, root);
         this.tcServer = new TailClientServer(xidResponseQue, port);
+        init();
     }
 
     public void init() throws IOException, InterruptedException, KeeperException {
         startTcServer();
         connectToZk();
-        Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(()-> {
-                    if (!updateCtxInProgress.get()) {
-                        updateStubs();;
-                    }
-                }, 0, 10, TimeUnit.MILLISECONDS);
+        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(()-> {
+            if (!updateCtxInProgress.get()) {
+                updateStubs();
+            }
+            }, 0, 10, TimeUnit.MILLISECONDS);
     }
 
     public void connectToZk() throws IOException, InterruptedException, KeeperException {
@@ -189,7 +191,6 @@ public class TailChainClient {
                 }
                 if (rc == 1) {
                     System.out.println("The tail has been changed. Retrying...");
-                    continue;
                 }
             } catch (StatusRuntimeException e) {
                 // case 5: (after request was sent) all nodes in chain went down

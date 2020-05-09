@@ -41,14 +41,14 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailChainReplicaService.class);
 
-    private ZookeeperClient zk;
-    private ConcurrentMap<String, Integer> kvStore = new ConcurrentHashMap<>();
-    private ConcurrentMap<TailStateUpdateRequest, Boolean> statePropagateReqQue = new ConcurrentHashMap<>();
+    private final ZookeeperClient zk;
+    private final ConcurrentMap<String, Integer> kvStore = new ConcurrentHashMap<>();
+    private final ConcurrentMap<TailStateUpdateRequest, Boolean> statePropagateReqQue = new ConcurrentHashMap<>();
+    private final AtomicLong latestXid = new AtomicLong();
+    private final AtomicBoolean updateCtxInProgress = new AtomicBoolean();
     private TailChainReplicaBlockingStub successorStub; // to propagate state
     private TailChainReplicaBlockingStub tailStub; // log truncation
     private TailClientBlockingStub clientStub; // used to notify client
-    private AtomicLong latestXid = new AtomicLong();
-    private AtomicBoolean updateCtxInProgress = new AtomicBoolean();
     private long successorId = -1;
     private long predecessorID = -1;
     private long headSid = -1;
@@ -65,10 +65,10 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         LOG.debug("ProposeStateUpdate request - cXid: {} client(ip:port):({}:{}) key: {} val: {} src:{} xid:{}",
                 req.getCxid(), req.getHost(), req.getPort(), req.getKey(), req.getValue(), req.getSrc(), req.getXid());
         ChainResponse.Builder rspBldr = ChainResponse.newBuilder();
-        // is my predecessor sending me this?
+        // is my predecessor sending me this request?
         if (req.getSrc() != predecessorID) {
             rspBldr.setRc(1);
-            LOG.debug("ProposeStateUpdate response - Not a valid predecessor");
+            LOG.debug("ProposeStateUpdate response - not a valid predecessor");
             rspObs.onNext(rspBldr.build());
             rspObs.onCompleted();
             return;
@@ -79,8 +79,7 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         // if I'm tail I'll notify client
         if (zk.amITail()) {
             TailClientBlockingStub tcbStub = getClientStub(req.getHost(), req.getPort());
-            CxidProcessedRequest request = CxidProcessedRequest.newBuilder()
-                    .setCxid(req.getCxid()).build();
+            CxidProcessedRequest request = CxidProcessedRequest.newBuilder().setCxid(req.getCxid()).build();
             try {
                 LOG.debug("State updates for xid:{} are complete. Notifying client - cXid:{}",
                         req.getXid(), req.getCxid());
@@ -145,18 +144,10 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         }
         // update xid
         latestXid.set(req.getStateXid());
-
-
         List<TailStateUpdateRequest> pendingUpdates = req.getSentList();
-        Collections.sort(pendingUpdates, new Comparator<TailStateUpdateRequest>() {
-            @Override
-            public int compare(TailStateUpdateRequest o1, TailStateUpdateRequest o2) {
-                return Long.compare(o1.getXid(), o2.getXid());
-            }
-        });
-
+        pendingUpdates.sort(Comparator.comparingLong(TailStateUpdateRequest::getXid));
         for (TailStateUpdateRequest r : pendingUpdates) {
-            System.out.println("Apply Req: " + r + " Xid: " + r.getXid());
+            LOG.debug("Apply Req: " + r + " Xid: " + r.getXid());
         }
 
         // apply missed update
@@ -327,12 +318,11 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
     }
 
     void startUpdateCtxThread() {
-        Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(() -> {
-                    if (!updateCtxInProgress.get()) {
-                        updateCtx();
-                    }
-                }, 5, 5, TimeUnit.MILLISECONDS);
+        Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
+            if (!updateCtxInProgress.get()) {
+                updateCtx();
+            }
+            }, 5, 5, TimeUnit.MILLISECONDS);
     }
 
     void startReqQuePruningThread() {
@@ -442,9 +432,6 @@ public class TailChainReplicaService extends TailChainReplicaImplBase {
         destroyStubAndChannel(successorStub);
         successorStub = getStub(sidToZNodeAbsPath(sid));
         successorId = sid;
-
-
-
         List<TailStateUpdateRequest> sentRequests = new ArrayList<>(statePropagateReqQue.keySet());
         Collections.sort(sentRequests, new Comparator<TailStateUpdateRequest>() {
             @Override

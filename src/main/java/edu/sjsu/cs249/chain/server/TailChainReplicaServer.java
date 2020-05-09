@@ -1,6 +1,6 @@
 // Author: Sushant Mane
 // Course: CS-249 - Distributed Computing
-// Project:  Chain Replication - Replicated Incremental HashTable Service
+// Project: Replicated Map Using Chain Replication
 ////////////////////////////////////////////////////////////////////////////
 
 package edu.sjsu.cs249.chain.server;
@@ -20,16 +20,14 @@ import java.io.IOException;
 public class TailChainReplicaServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(TailChainReplicaServer.class);
-    private Server server;
-    private ZookeeperClient zk;
-    private String ip;
+    private final Server server;
+    private final ZookeeperClient zk;
+    private final String ip;
 
     public TailChainReplicaServer(String zkAddress, String chainRoot, String ip, int port) {
         this.zk = new ZookeeperClient(zkAddress, chainRoot);
         this.ip = ip;
-        this.server = ServerBuilder.forPort(port)
-                .addService(new TailChainReplicaService(zk))
-                .build();
+        this.server = ServerBuilder.forPort(port).addService(new TailChainReplicaService(zk)).build();
     }
 
     public void start() throws IOException, InterruptedException, KeeperException {

@@ -23,14 +23,14 @@ public class ZookeeperClient implements Watcher {
     private static final int TIMEOUT = 15000;
 
     private ZooKeeper zk;
-    private String connectString;
+    private final String connectString;
     private long mySid;
-    private String root;
-    private CountDownLatch connLatch = new CountDownLatch(1);
-    private AtomicLong predecessorSid = new AtomicLong(-1);
-    private AtomicLong successorSid = new AtomicLong(-1);
-    private AtomicLong headSid = new AtomicLong(-1);
-    private AtomicLong tailSid = new AtomicLong(-1);
+    private final String root;
+    private final CountDownLatch connLatch = new CountDownLatch(1);
+    private final AtomicLong predecessorSid = new AtomicLong(-1);
+    private final AtomicLong successorSid = new AtomicLong(-1);
+    private final AtomicLong headSid = new AtomicLong(-1);
+    private final AtomicLong tailSid = new AtomicLong(-1);
 
     public ZookeeperClient(String connectString, String root) {
         this.connectString = connectString;
@@ -76,13 +76,9 @@ public class ZookeeperClient implements Watcher {
     }
 
     // return true if node exists
-    private boolean exists(String path, boolean watch)
-            throws KeeperException, InterruptedException {
+    private boolean exists(String path, boolean watch) throws KeeperException, InterruptedException {
         Stat stat = zk.exists(path, watch);
-        if (stat == null) {
-            return false;
-        }
-        return true;
+        return stat != null;
     }
 
     // create a node and set data for it
@@ -126,7 +122,7 @@ public class ZookeeperClient implements Watcher {
     }
 
     // returns sorted list of children of given node
-    private List<Long> getOrderListOfChainNodes(String path, boolean watch)
+    private List<Long> getOrderedListOfChainNodes(String path, boolean watch)
             throws KeeperException, InterruptedException {
         List<String> children = getChildren(path, watch);
         List<Long> sessionIds = new ArrayList<>();
@@ -196,7 +192,7 @@ public class ZookeeperClient implements Watcher {
         LOG.debug("Updating context...");
         List<Long> sids;
         try {
-            sids = getOrderListOfChainNodes(root, true);
+            sids = getOrderedListOfChainNodes(root, true);
         } catch (KeeperException | InterruptedException ignore) {
             LOG.error("Failed to update context.Exception: ", ignore);
             return;
@@ -235,10 +231,8 @@ public class ZookeeperClient implements Watcher {
     @Override
     public void process(WatchedEvent event) {
         //System.out.println("Notification: " + Thread.currentThread().getName());
-        LOG.debug("New notification - type: {} state: {}", event.getType(),
-                event.getState().toString());
-        if (event.getState() == Event.KeeperState.Expired
-                || event.getState() == Event.KeeperState.Closed) {
+        LOG.debug("New notification - type: {} state: {}", event.getType(), event.getState().toString());
+        if (event.getState() == Event.KeeperState.Expired || event.getState() == Event.KeeperState.Closed) {
             LOG.info("Zookeeper session expired/closed. Cause: {}", event.getState().toString());
             // exit on session expiration
             System.exit(2);
